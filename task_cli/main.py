@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+import builtins
 import sys
+
+_orig_print = builtins.print
+def _safe_print(*args, **kwargs):
+    try:
+        _orig_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        text = " ".join(str(a) for a in args)
+        safe = text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8")
+        _orig_print(safe, **kwargs)
 
 from task_cli.presentation.commands import (
     AppContext,
     build_parser,
+    cmd_batch_delete,
+    cmd_batch_import,
+    cmd_batch_link,
+    cmd_batch_update,
     cmd_catalog,
     cmd_delete,
     cmd_export,
@@ -34,6 +48,7 @@ def entry() -> None:
     4. Dispatch to command handler
     5. Exit with appropriate code (0=success, 1=error)
     """
+    builtins.print = _safe_print
     parser = build_parser()
     args = parser.parse_args()
 
@@ -58,6 +73,10 @@ def entry() -> None:
         "export": cmd_export,
         "port": cmd_port,
         "catalog": cmd_catalog,
+        "batch-import": cmd_batch_import,
+        "batch-link": cmd_batch_link,
+        "batch-update": cmd_batch_update,
+        "batch-delete": cmd_batch_delete,
     }
     _NEEDS_DB = {
         "insert",
@@ -72,6 +91,10 @@ def entry() -> None:
         "log",
         "import",
         "export",
+        "batch-import",
+        "batch-link",
+        "batch-update",
+        "batch-delete",
     }
 
     ctx = AppContext()

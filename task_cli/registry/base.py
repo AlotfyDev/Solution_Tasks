@@ -17,6 +17,7 @@ class TaskSchema:
     # Path to the JSON Schema file used for validation
     json_schema_path: Optional[Path] = None
     _json_schema: Optional[dict] = None
+    _json_schema_mtime: Optional[float] = None
 
     # Table configuration: maps logical groups to SQL table names (per-schema suffix)
     # e.g. {"main": "tasks_implementation", "criteria": "acceptance_criteria_implementation"}
@@ -26,9 +27,12 @@ class TaskSchema:
     ddl_statements: list[str] = field(default_factory=list)
 
     def json_schema(self) -> dict:
-        if self._json_schema is None and self.json_schema_path is not None:
-            with open(self.json_schema_path, "r", encoding="utf-8") as f:
-                self._json_schema = json.load(f)
+        if self.json_schema_path is not None:
+            current_mtime = self.json_schema_path.stat().st_mtime
+            if self._json_schema_mtime is None or current_mtime != self._json_schema_mtime:
+                with open(self.json_schema_path, "r", encoding="utf-8") as f:
+                    self._json_schema = json.load(f)
+                self._json_schema_mtime = current_mtime
         return self._json_schema or {}
 
     def validate(self, instance: dict) -> list[str]:

@@ -40,7 +40,7 @@ class AppContext:
 
         self.store = TaskStore(self.engine, self.schema_registry)
         self.history = HistoryTracker(self.engine)
-        self.validator = TaskValidator(self.schema_registry)
+        self.validator = TaskValidator(self.schema_registry, engine=self.engine)
 
 
 def register_default_relationships(rel_registry: RelationshipRegistry) -> None:
@@ -91,7 +91,7 @@ def _print_table(headers: list[str], rows: list[list[str]]) -> None:
         for i, val in enumerate(row):
             widths[i] = max(widths[i], len(val))
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
-    sep = "─" * (sum(widths) + 2 * (len(widths) - 1))
+    sep = "-" * (sum(widths) + 2 * (len(widths) - 1))
     print(fmt.format(*headers))
     print(sep)
     for row in rows:
@@ -200,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--schema", required=True, help="Schema ID to export")
     p.add_argument("--status", default=None, choices=["pending", "in_progress", "completed", "blocked", "cancelled"], help="Filter by status")
     p.add_argument("--phase", type=int, default=None, help="Filter by phase number")
-    p.add_argument("--output-dir", type=Path, default=Path("./export"), help="Output directory (default: ./export/)")
+    p.add_argument("--output-dir", type=Path, default=None, help="Output directory (default: ./export/, overridable via TASK_EXPORT_DIR env var)")
 
     # port
     p = sub.add_parser("port", help="Find available TCP ports on 127.0.0.1")
@@ -210,6 +210,34 @@ def build_parser() -> argparse.ArgumentParser:
     # catalog
     p = sub.add_parser("catalog", help="Display the complete tool catalog with all commands, tools, resources, and schemas")
     p.add_argument("--format", default="markdown", choices=["markdown", "json"], help="Output format (default: markdown)")
+
+    # batch-import
+    p = sub.add_parser("batch-import", help="Batch import JSON files from a directory with enhanced flags")
+    p.add_argument("dir", type=str, help="Directory containing JSON task files")
+    p.add_argument("--schema", default=None, help="Schema ID (auto-detected if omitted)")
+    p.add_argument("--dry-run", action="store_true", help="Validate only, no insert")
+    p.add_argument("--skip-errors", action="store_true", help="Continue on individual file error")
+
+    # batch-link
+    p = sub.add_parser("batch-link", help="Batch link tasks by naming convention or mapping file")
+    p.add_argument("--source-schema", default="testing", help="Source schema ID")
+    p.add_argument("--target-schema", default="implementation", help="Target schema ID")
+    p.add_argument("--rel-type", default="tests", help="Relationship type")
+    p.add_argument("--by-field", default=None, help="Field name to match (e.g., parent_aa)")
+    p.add_argument("--from-file", default=None, help="JSON mapping file path")
+
+    # batch-update
+    p = sub.add_parser("batch-update", help="Batch update task status")
+    p.add_argument("--schema", default=None, help="Schema ID (auto-detected if omitted)")
+    p.add_argument("--status", required=True, choices=["pending", "in_progress", "completed", "blocked", "cancelled"], help="New status")
+    p.add_argument("--phase", type=int, default=None, help="Filter by phase number")
+    p.add_argument("--ids", default=None, help="Comma-separated task IDs")
+
+    # batch-delete
+    p = sub.add_parser("batch-delete", help="Batch delete tasks")
+    p.add_argument("--schema", default=None, help="Schema ID (auto-detected if omitted)")
+    p.add_argument("--ids", default=None, help="Comma-separated task IDs")
+    p.add_argument("--phase", type=int, default=None, help="Filter by phase number")
 
     return parser
 
@@ -233,9 +261,9 @@ def cmd_validate(args: argparse.Namespace, ctx: AppContext) -> None:
 
     if errors:
         for err in errors:
-            print(f"  \u2717 {err}")
+            print(f"  [FAIL] {err}")
     else:
-        print("\u2713 valid")
+        print("[OK] valid")
 
 
 def cmd_insert(args: argparse.Namespace, ctx: AppContext) -> None:
@@ -256,7 +284,7 @@ def cmd_insert(args: argparse.Namespace, ctx: AppContext) -> None:
     if errors:
         print(f"Validation failed for schema '{schema_id}':")
         for err in errors:
-            print(f"  \u2717 {err}")
+            print(f"  [FAIL] {err}")
         return
 
     task_id = ctx.store.insert_task(schema_id, data)
@@ -280,7 +308,7 @@ def cmd_update(args: argparse.Namespace, ctx: AppContext) -> None:
     ctx.store.update_status(schema_id, task_id, new_status)
     ctx.history.record_status_change(task_id, schema_id, old_status, new_status)
     ctx.engine._conn.commit()
-    print(f"Updated {task_id}: status '{old_status}' \u2192 '{new_status}'")
+    print(f"Updated {task_id}: status '{old_status}' -> '{new_status}'")
 
 
 def cmd_get(args: argparse.Namespace, ctx: AppContext) -> None:
@@ -415,7 +443,7 @@ def cmd_link(args: argparse.Namespace, ctx: AppContext) -> None:
             },
         )
         ctx.engine._conn.commit()
-        print(f"Linked {args.source_id} \u2192 {args.target_id} ({rel_type_name})")
+        print(f"Linked {args.source_id} -> {args.target_id} ({rel_type_name})")
     except Exception as e:
         print(f"Error: {e}")
 
@@ -448,7 +476,7 @@ def cmd_status(args: argparse.Namespace, ctx: AppContext) -> None:
         if rows:
             for r in rows:
                 print(f"  {r['status']:<15} {r['cnt']}")
-            print(f"  {'─' * 22}")
+            print(f"  {'-' * 22}")
             print(f"  {'TOTAL':<15} {total}")
         else:
             print("  (no tasks)")
@@ -574,7 +602,10 @@ def cmd_import(args: argparse.Namespace, ctx: AppContext) -> None:
 
 def cmd_export(args: argparse.Namespace, ctx: AppContext) -> None:
     schema_id = args.schema
-    output_dir = Path(args.output_dir)
+    output_dir = args.output_dir
+    if output_dir is None:
+        output_dir = Path(os.environ.get("TASK_EXPORT_DIR", "./export"))
+    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     tasks = ctx.store.list_tasks(
@@ -633,3 +664,281 @@ def cmd_port(args: argparse.Namespace, ctx: AppContext) -> None:
         else:
             port = find_free_port()
         print(port)
+
+
+def _get_field_value(task_data: dict, field: str, task_id: str) -> str:
+    parts = field.split(".", 1)
+    if len(parts) == 2:
+        nested = task_data.get(parts[0], {})
+        if isinstance(nested, dict):
+            val = nested.get(parts[1], "")
+            if val:
+                return val
+    val = task_data.get(field, "")
+    if val:
+        return val
+    import re
+    stripped = task_id
+    if stripped.startswith("TD-"):
+        stripped = stripped[3:]
+    m = re.match(r"^(.+)-\d+$", stripped)
+    if m:
+        return m.group(1)
+    return stripped
+
+
+def _validate_rel(ctx, rel_type_name, source_schema, target_schema):
+    try:
+        rel_def = ctx.rel_registry.get(rel_type_name)
+    except KeyError:
+        raise ValueError(f"Relationship type '{rel_type_name}' not found. Registered: {[r.name for r in ctx.rel_registry.list()]}")
+    if rel_def.source_schema_id != source_schema:
+        raise ValueError(
+            f"Relationship '{rel_type_name}' expects source schema "
+            f"'{rel_def.source_schema_id}', got '{source_schema}'"
+        )
+    if rel_def.target_schema_id != target_schema:
+        raise ValueError(
+            f"Relationship '{rel_type_name}' expects target schema "
+            f"'{rel_def.target_schema_id}', got '{target_schema}'"
+        )
+    return rel_def
+
+
+def _do_batch_link(ctx, source_id, target_id, rel_type_name, source_schema, target_schema):
+    ctx.engine.execute(
+        "INSERT INTO task_relationships "
+        "(source_id, source_schema, target_id, target_schema, rel_type) "
+        "VALUES (:s, :ss, :t, :ts, :r)",
+        {"s": source_id, "ss": source_schema, "t": target_id, "ts": target_schema, "r": rel_type_name},
+    )
+    ctx.engine._conn.commit()
+
+
+def cmd_batch_import(args: argparse.Namespace, ctx: AppContext) -> None:
+    src_dir = Path(args.dir)
+    if not src_dir.is_dir():
+        print(f"Error: not a directory: {src_dir}")
+        return
+
+    json_files = sorted(src_dir.glob("*.json"))
+    if not json_files:
+        print("No JSON files found")
+        return
+
+    imported = 0
+    errors = 0
+    skipped = 0
+    schema_override = args.schema
+    dry_run = args.dry_run
+    skip_errors = args.skip_errors
+
+    for fp in json_files:
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            msg = f"invalid JSON ({e})"
+            if skip_errors:
+                print(f"  SKIP {fp.name}: {msg}")
+                skipped += 1
+                continue
+            else:
+                print(f"  FAIL {fp.name}: {msg}")
+                errors += 1
+                continue
+
+        schema_id = schema_override if schema_override else _auto_schema_id(data)
+        errs = ctx.validator.validate(data, schema_id)
+        if errs:
+            msg = f"validation failed for schema '{schema_id}'"
+            if skip_errors:
+                print(f"  SKIP {fp.name}: {msg}")
+                for e in errs:
+                    print(f"    {e}")
+                skipped += 1
+                continue
+            else:
+                print(f"  FAIL {fp.name}: {msg}")
+                for e in errs:
+                    print(f"    {e}")
+                errors += 1
+                continue
+
+        if dry_run:
+            print(f"  OK   {fp.name} -> {schema_id} (dry run)")
+            imported += 1
+            continue
+
+        try:
+            task_id = ctx.store.insert_task(schema_id, data)
+            ctx.history.record_creation(task_id, schema_id)
+            ctx.engine._conn.commit()
+            imported += 1
+            print(f"  OK   {fp.name} -> {task_id}")
+        except Exception as e:
+            print(f"  FAIL {fp.name}: {e}")
+            errors += 1
+
+    print(f"Imported {imported} files, {errors} errors, {skipped} skipped")
+
+
+def cmd_batch_link(args: argparse.Namespace, ctx: AppContext) -> None:
+    source_schema = args.source_schema
+    target_schema = args.target_schema
+    rel_type_name = args.rel_type
+    by_field = args.by_field
+    from_file = args.from_file
+
+    if not by_field and not from_file:
+        print("Error: either --by-field or --from-file is required")
+        return
+    if by_field and from_file:
+        print("Error: --by-field and --from-file are mutually exclusive")
+        return
+
+    try:
+        _validate_rel(ctx, rel_type_name, source_schema, target_schema)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return
+
+    linked = 0
+    errors = 0
+
+    if from_file:
+        fp = Path(from_file)
+        if not fp.exists():
+            print(f"Error: file not found: {fp}")
+            return
+        try:
+            mapping = json.loads(fp.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(f"Error: invalid mapping file: {e}")
+            return
+
+        for item in mapping:
+            source_id = item.get("source_id")
+            target_id = item.get("target_id")
+            if not source_id or not target_id:
+                errors += 1
+                print(f"  FAIL: invalid entry {item}")
+                continue
+            try:
+                _do_batch_link(ctx, source_id, target_id, rel_type_name, source_schema, target_schema)
+                print(f"  OK   {source_id} -> {target_id}")
+                linked += 1
+            except Exception as e:
+                errors += 1
+                print(f"  FAIL {source_id} -> {target_id}: {e}")
+
+    elif by_field:
+        source_tasks = ctx.store.list_tasks(source_schema)
+        target_tasks = ctx.store.list_tasks(target_schema)
+
+        for src in source_tasks:
+            src_id = src["id"]
+            field_value = _get_field_value(src, by_field, src_id)
+            if not field_value:
+                continue
+
+            for tgt in target_tasks:
+                tid = tgt["id"]
+                if tid == field_value or (isinstance(field_value, str) and tid.startswith(f"{field_value}-")):
+                    try:
+                        _do_batch_link(ctx, src_id, tid, rel_type_name, source_schema, target_schema)
+                        print(f"  OK   {src_id} -> {tid}")
+                        linked += 1
+                    except Exception as e:
+                        errors += 1
+                        print(f"  FAIL {src_id} -> {tid}: {e}")
+
+    print(f"Linked {linked} pairs, {errors} errors")
+
+
+def cmd_batch_update(args: argparse.Namespace, ctx: AppContext) -> None:
+    new_status = args.status
+    phase = args.phase
+    ids_str = args.ids
+    schema_arg = args.schema
+
+    if phase is None and not ids_str:
+        print("Error: either --phase or --ids is required")
+        return
+
+    updated = 0
+
+    if ids_str:
+        ids = [tid.strip() for tid in ids_str.split(",") if tid.strip()]
+        for tid in ids:
+            sid = schema_arg if schema_arg else ("testing" if tid.startswith("TD-") else "implementation")
+            existing = ctx.store.get_task(sid, tid)
+            if existing is None:
+                print(f"  SKIP {tid}: not found in schema '{sid}'")
+                continue
+            old_status = existing.get("status", "")
+            try:
+                ctx.store.update_status(sid, tid, new_status)
+                ctx.history.record_status_change(tid, sid, old_status, new_status)
+                ctx.engine._conn.commit()
+                updated += 1
+                print(f"  OK   {tid}: {old_status} -> {new_status}")
+            except ValueError as e:
+                print(f"  FAIL {tid}: {e}")
+
+    if phase is not None:
+        schema_ids = [schema_arg] if schema_arg else ctx.schema_registry.list_ids()
+        for sid in schema_ids:
+            tasks = ctx.store.list_tasks(sid, phase_filter=phase)
+            for task in tasks:
+                tid = task["id"]
+                old_status = task.get("status", "")
+                try:
+                    ctx.store.update_status(sid, tid, new_status)
+                    ctx.history.record_status_change(tid, sid, old_status, new_status)
+                    ctx.engine._conn.commit()
+                    updated += 1
+                    print(f"  OK   {tid}: {old_status} -> {new_status}")
+                except ValueError as e:
+                    print(f"  FAIL {tid}: {e}")
+
+    print(f"Updated {updated} tasks")
+
+
+def cmd_batch_delete(args: argparse.Namespace, ctx: AppContext) -> None:
+    ids_str = args.ids
+    phase = args.phase
+    schema_arg = args.schema
+
+    if phase is None and not ids_str:
+        print("Error: either --phase or --ids is required")
+        return
+
+    deleted = 0
+
+    if ids_str:
+        ids = [tid.strip() for tid in ids_str.split(",") if tid.strip()]
+        for tid in ids:
+            sid = schema_arg if schema_arg else ("testing" if tid.startswith("TD-") else "implementation")
+            if ctx.store.delete_task(sid, tid):
+                ctx.history.record_change(tid, sid, "__deleted__", None, None)
+                ctx.engine._conn.commit()
+                deleted += 1
+                print(f"  OK   {tid}")
+            else:
+                print(f"  SKIP {tid}: not found in schema '{sid}'")
+
+    if phase is not None:
+        schema_ids = [schema_arg] if schema_arg else ctx.schema_registry.list_ids()
+        for sid in schema_ids:
+            tasks = ctx.store.list_tasks(sid, phase_filter=phase)
+            for task in tasks:
+                tid = task["id"]
+                if ctx.store.delete_task(sid, tid):
+                    ctx.history.record_change(tid, sid, "__deleted__", None, None)
+                    ctx.engine._conn.commit()
+                    deleted += 1
+                    print(f"  OK   {tid}")
+                else:
+                    print(f"  FAIL {tid}: delete failed")
+
+    print(f"Deleted {deleted} tasks")

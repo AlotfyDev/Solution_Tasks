@@ -47,7 +47,7 @@
   },
 
   "properties": {
-    "sub_task_id": { "type": "string", "pattern": "^TD-[A-Z]+\\d+-\\d+(-\\d+)*$" },
+    "sub_task_id": { "type": "string", "pattern": "^TD-[A-Z0-9._-]+$" },
     "sequence": { "type": "integer", "minimum": 1 },
     "hierarchy_level": { "type": "integer", "minimum": 1, "maximum": 10 },
 

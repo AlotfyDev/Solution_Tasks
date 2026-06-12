@@ -3,23 +3,20 @@ import json
 from pathlib import Path
 from typing import Optional
 from task_cli.registry import SchemaRegistry
+from task_cli.validation.business_rules import BusinessRuleValidator
 
 
 class TaskValidator:
-    """Validates task JSON instances against registered schemas."""
-
-    def __init__(self, registry: SchemaRegistry):
+    def __init__(self, registry: SchemaRegistry, engine=None):
         self._registry = registry
+        self._business = BusinessRuleValidator(engine, registry)
 
     def validate(self, instance: dict, schema_id: str) -> list[str]:
-        """
-        Validate a dict instance against a registered schema.
-        Returns empty list if valid, list of error messages if invalid.
-        Uses the TaskSchema.validate() method internally.
-        Raises KeyError if schema_id not registered.
-        """
         schema = self._registry.get(schema_id)
-        return schema.validate(instance)
+        errors = schema.validate(instance)
+        biz_errors = self._business.validate(instance, schema_id)
+        errors.extend(biz_errors)
+        return errors
 
     def validate_file(self, file_path: Path, schema_id: Optional[str] = None) -> list[str]:
         """

@@ -115,13 +115,13 @@ class TestToolCatalog:
         result = catalog.get_catalog_json()
         cmd_names = [c["name"] for c in result["cli_commands"]]
         assert "catalog" in cmd_names
-        assert len(cmd_names) == 16
+        assert len(cmd_names) == 20
 
     def test_json_lists_mcp_tools(self, catalog):
         result = catalog.get_catalog_json()
         tool_names = [t["name"] for t in result["mcp_tools"]]
         assert "get_catalog" in tool_names
-        assert len(tool_names) == 13
+        assert len(tool_names) == 18
 
     def test_json_lists_mcp_resources(self, catalog):
         result = catalog.get_catalog_json()

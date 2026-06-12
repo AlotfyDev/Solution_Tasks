@@ -3,11 +3,11 @@
   "sequence": 1,
   "hierarchy_level": 1,
   "source": {
-    "file": "TD-0-C05-ThreadModel.md",
-    "relative_path": "Logger_Adapter_Tests/.docs",
+    "file": "TD-ThreadModel.md",
+    "relative_path": "docs/tests",
     "lines": [24, 26],
     "section_title": "Positive Cases - Normal operation",
-    "section_markdown": "4 frontend threads each call GetLogger and LOG_INFO 1000 times..."
+    "section_markdown": "4 worker threads each perform concurrent operations 1000 times..."
   },
   "metadata": {
     "phase": 0,
@@ -18,15 +18,15 @@
     "tags": ["thread_model"]
   },
   "task": {
-    "title": "Normal operation - 4 threads log 1000 messages each",
-    "description": "4 frontend threads each call GetLogger and LOG_INFO 1000 times...",
-    "implementation_notes": "Use gtest, real Quill backend, fake slow sink with atomic counter",
+    "title": "Normal operation - 4 threads perform 1000 concurrent operations each",
+    "description": "4 worker threads each perform concurrent operations 1000 times...",
+    "implementation_notes": "Use gtest, real backend, fake slow sink with atomic counter",
     "scenarios": [
       {"id": "S1", "name": "NormalOperation", "type": "positive"}
     ],
     "files_to_modify": [
       {
-        "path": "Logger_Adapter_Tests/UnitTests/ThreadModel/NormalOperation.cpp",
+        "path": "tests/unit/ThreadModel/NormalOperation.cpp",
         "change_type": "create",
         "framework": "gtest",
         "test_cases": [
@@ -35,7 +35,7 @@
       }
     ],
     "acceptance_criteria": [
-      {"id": "TC-01", "description": "All 4000 messages arrive at sink", "verified_by": "ci"}
+      {"id": "TC-01", "description": "All 4000 operations complete successfully", "verified_by": "ci"}
     ]
   },
   "traceability": {

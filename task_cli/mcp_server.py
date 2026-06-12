@@ -111,6 +111,24 @@ def delete_task(task_id: str, schema_id: str = "implementation") -> str:
     return f"Deleted {task_id}"
 
 
+@mcp.tool(description="Delete a relationship between two tasks. rel_type options: tests, depends_on, implements, verifies")
+def unlink_tasks(
+    source_id: str,
+    target_id: str,
+    rel_type: str = "tests",
+    source_schema: str = "testing",
+    target_schema: str = "implementation",
+) -> str:
+    ctx = get_context()
+    ctx.engine.execute(
+        "DELETE FROM task_relationships "
+        "WHERE source_id=:src AND source_schema=:ss AND target_id=:tgt AND target_schema=:ts AND rel_type=:rt",
+        {"src": source_id, "ss": source_schema, "tgt": target_id, "ts": target_schema, "rt": rel_type},
+    )
+    ctx.engine._conn.commit()
+    return f"Unlinked {source_id} -> {target_id} ({rel_type})"
+
+
 @mcp.tool(description="Create a relationship between two tasks. rel_type options: tests, depends_on, implements, verifies")
 def link_tasks(
     source_id: str,
@@ -271,6 +289,21 @@ def status_resource() -> str:
     return report.full_report()
 
 
+@mcp.tool(description="Force reload all schemas from disk (picks up changes to JSON schema files)")
+def reload_schemas() -> str:
+    ctx = get_context()
+    count = 0
+    for sid in ctx.schema_registry.list_ids():
+        schema = ctx.schema_registry.get(sid)
+        if not schema.json_schema_path or not schema.json_schema_path.exists():
+            continue
+        # Force re-read from disk regardless of cache
+        with open(schema.json_schema_path, "r", encoding="utf-8") as f:
+            schema._json_schema = json.load(f)
+        count += 1
+    return f"Reloaded {count} schemas"
+
+
 @mcp.tool(description="Get the complete tool catalog describing all commands, tools, resources, and schemas")
 def get_catalog(format: str = "markdown") -> str:
     """Returns catalog in markdown (default) or JSON format."""
@@ -279,6 +312,195 @@ def get_catalog(format: str = "markdown") -> str:
     if format == "json":
         return json.dumps(catalog.get_catalog_json(), indent=2)
     return catalog.get_catalog_markdown()
+
+
+@mcp.tool(description="Batch import all JSON task files from a directory")
+def import_tasks(
+    dir_path: str,
+    schema: Optional[str] = None,
+    dry_run: bool = False,
+    skip_errors: bool = False,
+) -> str:
+    ctx = get_context()
+    src_dir = Path(dir_path)
+    if not src_dir.is_dir():
+        return f"Error: not a directory: {src_dir}"
+
+    json_files = sorted(src_dir.glob("*.json"))
+    if not json_files:
+        return "No JSON files found"
+
+    imported = 0
+    errors = 0
+    skipped = 0
+
+    for fp in json_files:
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            msg = f"invalid JSON ({e})"
+            if skip_errors:
+                skipped += 1
+                continue
+            else:
+                errors += 1
+                continue
+
+        schema_id = schema if schema else _auto_schema_id(data)
+        errs = ctx.validator.validate(data, schema_id)
+        if errs:
+            if skip_errors:
+                skipped += 1
+                continue
+            else:
+                errors += 1
+                continue
+
+        if dry_run:
+            imported += 1
+            continue
+
+        try:
+            task_id = ctx.store.insert_task(schema_id, data)
+            ctx.history.record_creation(task_id, schema_id)
+            ctx.engine._conn.commit()
+            imported += 1
+        except Exception:
+            errors += 1
+
+    return f"Imported {imported} files, {errors} errors, {skipped} skipped"
+
+
+@mcp.tool(description="Export tasks to JSON files in a directory")
+def export_tasks(
+    schema_id: str,
+    output_dir: str,
+    status: Optional[str] = None,
+    phase: Optional[int] = None,
+) -> str:
+    ctx = get_context()
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    tasks = ctx.store.list_tasks(schema_id, status_filter=status, phase_filter=phase)
+    if not tasks:
+        return f"No tasks found for schema '{schema_id}' with given filters"
+
+    count = 0
+    for t in tasks:
+        tid = t["id"]
+        full = ctx.store.get_task(schema_id, tid)
+        if full is None:
+            continue
+        fp = out_path / f"{tid}.json"
+        fp.write_text(json.dumps(full, indent=2, default=str), encoding="utf-8")
+        count += 1
+
+    return f"Exported {count} tasks to {out_path}"
+
+
+@mcp.tool(description="Batch link tasks by field matching or mapping file")
+def batch_link_tasks(
+    source_schema: str = "testing",
+    target_schema: str = "implementation",
+    rel_type: str = "tests",
+    by_field: Optional[str] = None,
+    from_file: Optional[str] = None,
+) -> str:
+    ctx = get_context()
+
+    if not by_field and not from_file:
+        return "Error: either --by-field or --from-file is required"
+    if by_field and from_file:
+        return "Error: --by-field and --from-file are mutually exclusive"
+
+    try:
+        from task_cli.presentation.commands import _validate_rel, _do_batch_link, _get_field_value
+        _validate_rel(ctx, rel_type, source_schema, target_schema)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    linked = 0
+    errors = 0
+
+    if from_file:
+        fp = Path(from_file)
+        if not fp.exists():
+            return f"Error: file not found: {fp}"
+        try:
+            mapping = json.loads(fp.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            return f"Error: invalid mapping file: {e}"
+
+        for item in mapping:
+            source_id = item.get("source_id")
+            target_id = item.get("target_id")
+            if not source_id or not target_id:
+                errors += 1
+                continue
+            try:
+                _do_batch_link(ctx, source_id, target_id, rel_type, source_schema, target_schema)
+                linked += 1
+            except Exception:
+                errors += 1
+
+    elif by_field:
+        source_tasks = ctx.store.list_tasks(source_schema)
+        target_tasks = ctx.store.list_tasks(target_schema)
+
+        for src in source_tasks:
+            src_id = src["id"]
+            field_value = _get_field_value(src, by_field, src_id)
+            if not field_value:
+                continue
+
+            for tgt in target_tasks:
+                tid = tgt["id"]
+                if tid == field_value or (isinstance(field_value, str) and tid.startswith(f"{field_value}-")):
+                    try:
+                        _do_batch_link(ctx, src_id, tid, rel_type, source_schema, target_schema)
+                        linked += 1
+                    except Exception:
+                        errors += 1
+
+    return f"Linked {linked} pairs, {errors} errors"
+
+
+@mcp.tool(description="Batch update status for multiple tasks")
+def batch_update_status(
+    task_ids: Optional[str] = None,
+    new_status: str = "in_progress",
+    schema_id: Optional[str] = None,
+    phase: Optional[int] = None,
+) -> str:
+    ctx = get_context()
+    from task_cli.presentation.commands import cmd_batch_update
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    ns = argparse.Namespace(status=new_status, phase=phase, ids=task_ids, schema=schema_id)
+    with redirect_stdout(buf):
+        cmd_batch_update(ns, ctx)
+    return buf.getvalue().strip()
+
+
+@mcp.tool(description="Batch delete tasks by IDs or phase")
+def batch_delete_tasks(
+    task_ids: Optional[str] = None,
+    schema_id: Optional[str] = None,
+    phase: Optional[int] = None,
+) -> str:
+    ctx = get_context()
+    from task_cli.presentation.commands import cmd_batch_delete
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    ns = argparse.Namespace(ids=task_ids, phase=phase, schema=schema_id)
+    with redirect_stdout(buf):
+        cmd_batch_delete(ns, ctx)
+    return buf.getvalue().strip()
 
 
 @mcp.resource("catalog://overview", description="Complete tool catalog in markdown")

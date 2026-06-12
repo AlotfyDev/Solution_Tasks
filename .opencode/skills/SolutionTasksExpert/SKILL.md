@@ -21,7 +21,7 @@ The Task Toolkit MCP server is available at:
 - **stdio**: `task-mcp` (via Cline/Kilocode subprocess). Configured in `.cline/mcp.json` and `.kilo/mcp_servers.json`.
 - **SSE**: `task-mcp --sse --port PORT` (standalone network server)
 
-### Tools Available (13)
+### Tools Available (20)
 (Read `catalog://overview` or call `get_catalog()` for full details)
 
 | Tool | Purpose |
@@ -32,6 +32,8 @@ The Task Toolkit MCP server is available at:
 | `update_status` | Change task state |
 | `delete_task` | Remove task + cascade |
 | `link_tasks` | Create relationships |
+| `unlink_tasks` | Delete a relationship |
+| `reload_schemas` | Reload schema files from disk |
 | `status_report` | Full progress |
 | `gap_analysis` | Find coverage gaps |
 | `dependency_chain` | Trace dependencies |
@@ -39,6 +41,11 @@ The Task Toolkit MCP server is available at:
 | `validate_task` | Check JSON validity |
 | `get_history` | Change log |
 | `get_catalog` | This catalog |
+| `import_tasks` | Batch import JSON files from directory |
+| `export_tasks` | Export tasks to JSON files |
+| `batch_link_tasks` | Batch link by field matching |
+| `batch_update_status` | Batch update status for multiple tasks |
+| `batch_delete_tasks` | Batch delete tasks by IDs or phase |
 
 ### Resources Available (4)
 | Resource | Content |
@@ -55,11 +62,11 @@ Two default schemas are registered:
 
 **implementation** — for AA (After_Audit) implementation sub-tasks
 - Tables: `tasks_implementation`, `acceptance_criteria_implementation`, `task_files_implementation`, `tags_implementation`
-- `sub_task_id` pattern: `{AA_ID}-{seq}` (e.g., M05-01)
+- `sub_task_id` pattern: `^[A-Z][A-Z0-9._-]+$` (project-agnostic, e.g., `AA-0.5-01`)
 
 **testing** — for TD (Test Design) testing sub-tasks
 - Tables: `tasks_testing`, `test_scenarios_testing`, `test_files_testing`, `test_cases_testing`
-- `sub_task_id` pattern: `TD-{AA_ID}-{seq}` (e.g., TD-M05-01)
+- `sub_task_id` pattern: `^TD-[A-Z0-9._-]+$` (e.g., `TD-0.5-01` or `TD-AA-0.5-01`)
 
 ### Relationships
 | Name | Source → Target | Description |
@@ -74,6 +81,8 @@ All tasks use one of: `pending`, `in_progress`, `completed`, `blocked`, `cancell
 
 ### Phase Order
 Phases 0–9 are executed sequentially. Always check `list_tasks(phase=N)` before advancing.
+
+> **Important**: If JSON schema files (`implementation-schema.json` / `testing-schema.json`) were modified since the MCP server started, call `reload_schemas()` to pick up changes. The MCP server caches schemas at startup; without reload, validation uses stale patterns.
 
 ## Workflows
 
@@ -94,21 +103,29 @@ Full workflow in `workflows/daily-review.md`. Steps:
 3. `list_tasks(status="blocked")` → `dependency_chain(id)` for each
 4. `gap_analysis()` — implementation tasks without test coverage
 5. `get_history(task_id)` for active tasks
+6. Use `batch_update_status(phase=N, new_status="in_progress")` to start a phase
 
 ### 3. Gap Closure
 Full workflow in `workflows/gap-closure.md`. Steps:
 1. `gap_analysis()` — identify untested AA tasks
 2. For each gap: `get_task(id, schema_id="implementation")` → `search_tasks(query="TD-{AA_ID}")`
 3. Create missing TD sub-tasks via `insert_task()` → `link_tasks(source, target, rel_type="tests")`
-4. `gap_analysis()` — confirm closure
+4. [OPTIONAL] Use `batch_link_tasks(by_field="parent_aa")` to auto-link instead of manual `link_tasks()`
+5. `gap_analysis()` — confirm closure
 
 ### 4. Onboarding New Tasks
 Full workflow in `workflows/onboarding.md`. Steps:
-1. Prepare JSON conforming to schema
-2. `validate_task(json)` — fix errors until valid
-3. `insert_task(json)` — returns task ID
-4. `link_tasks()` — record dependencies
-5. `get_task(id)` — verify all fields correct
+1. Read canonical example at `Solution_Tasks/default_schemas/example-testing-task.json`
+2. Prepare JSON conforming to schema (match field types exactly)
+3. `validate_task(json)` — fix errors until valid
+4. `insert_task(json)` — returns task ID
+5. `link_tasks()` — record dependencies
+6. [OPTIONAL] Use `import_tasks(dir_path)` to bulk insert if multiple JSON files exist
+7. `get_task(id)` — verify all fields correct
+8. `export_tasks(schema_id="implementation", output_dir=<dir>)` or `export_tasks(schema_id="testing", output_dir=<dir>)` to write JSON files from DB (do NOT write JSON manually)
+9. Extract `source.section_markdown` from the actual markdown source file (not a placeholder) and populate `traceability` with `aa_reference` and `td_reference`
+
+> **Note**: Testing schema has strict formats — `aa_dependencies` requires array of `{"id": "..."}` objects (not strings), and **testing** acceptance criterion IDs must match `^TC-\d+$` (digits only, e.g., `TC-01`). **implementation** AC IDs are `type: string` (any format, e.g., `AC-01`). Read the canonical example before producing JSON.
 
 ## Best Practices
 
@@ -119,6 +136,19 @@ Full workflow in `workflows/onboarding.md`. Steps:
 5. **Phase order**: Tasks should be implemented in phase order (0 → 9). Check `list_tasks(phase=N)`.
 6. **Test coverage**: After implementing AA tasks, always create corresponding TD tasks and link via `link_tasks(rel_type="tests")`.
 7. **Use catalog reference**: When unsure about tool parameters, call `get_catalog(format="json")`.
+
+## Batch Operations
+
+The toolkit now provides batch operations for efficient task management
+(added in v0.2.0):
+
+| Operation | CLI | MCP | Description |
+|-----------|-----|-----|-------------|
+| Batch Import | `task batch-import <dir> [--schema <id>] [--dry-run] [--skip-errors]` | `import_tasks()` | Import multiple JSON files at once from a directory. Auto-detects schema unless `--schema` provided. Use `--dry-run` to validate without inserting. |
+| Batch Link | `task batch-link --source-schema <s> --target-schema <t> --rel-type <r> --by-field <f>` | `batch_link_tasks()` | Link tasks by field matching (e.g., `parent_aa` matches target tasks with matching ID prefix) or from a mapping JSON file. |
+| Batch Update | `task batch-update --status <s> [--phase <n>] [--ids <csv>]` | `batch_update_status()` | Update status for all tasks in a phase or for specific IDs. |
+| Batch Delete | `task batch-delete [--ids <csv>] [--phase <n>]` | `batch_delete_tasks()` | Delete multiple tasks by phase or by specific IDs. |
+| Batch Export | `task export --schema <id> [--output-dir <dir>]` | `export_tasks()` | Export all tasks from a schema to individual JSON files (was existing, now also an MCP tool). |
 
 ## Database
 

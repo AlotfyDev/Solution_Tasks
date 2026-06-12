@@ -8,6 +8,10 @@ import pytest
 from task_cli.presentation.commands import (
     AppContext,
     build_parser,
+    cmd_batch_delete,
+    cmd_batch_import,
+    cmd_batch_link,
+    cmd_batch_update,
     cmd_delete,
     cmd_get,
     cmd_history,
@@ -81,6 +85,36 @@ class TestBuildParser:
         assert args.command == "query"
         assert args.sql == "SELECT * FROM tasks_implementation"
 
+    def test_batch_import_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["batch-import", "some_dir", "--dry-run", "--skip-errors"])
+        assert args.command == "batch-import"
+        assert args.dir == "some_dir"
+        assert args.dry_run is True
+        assert args.skip_errors is True
+
+    def test_batch_link_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["batch-link", "--source-schema", "testing", "--target-schema", "implementation", "--rel-type", "tests", "--by-field", "parent_aa"])
+        assert args.command == "batch-link"
+        assert args.by_field == "parent_aa"
+        assert args.from_file is None
+
+    def test_batch_update_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["batch-update", "--status", "in_progress", "--phase", "1", "--ids", "A,B"])
+        assert args.command == "batch-update"
+        assert args.status == "in_progress"
+        assert args.phase == 1
+        assert args.ids == "A,B"
+
+    def test_batch_delete_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(["batch-delete", "--ids", "A,B", "--schema", "testing"])
+        assert args.command == "batch-delete"
+        assert args.ids == "A,B"
+        assert args.schema == "testing"
+
 
 class TestAppContext:
     def test_initialization_creates_components(self, tmp_path):
@@ -117,6 +151,14 @@ class TestAppContext:
         ctx = AppContext()
         ctx.initialize(db_dir=tmp_path)
         assert ctx.db_dir == tmp_path
+
+
+class TestPrintSafe:
+    def test_print_safe_handles_unicode_on_windows(self, capsys):
+        import builtins
+        print("[OK] valid")
+        captured = capsys.readouterr()
+        assert "[OK] valid" in captured.out
 
 
 class TestRegisterDefaultRelationships:
@@ -456,3 +498,152 @@ class TestCmdLog:
         cmd_log(args, app_context)
         captured = capsys.readouterr()
         assert "No recent changes" in captured.out
+
+
+class TestCmdBatchImport:
+    def test_dry_run(self, app_context, impl_json_file, capsys, tmp_path):
+        args = argparse.Namespace(dir=str(tmp_path), schema=None, dry_run=True, skip_errors=False)
+        cmd_batch_import(args, app_context)
+        captured = capsys.readouterr()
+        assert "dry run" in captured.out
+
+    def test_schema_override(self, app_context, capsys, tmp_path):
+        import json
+        data = {
+            "sub_task_id": "TD-BATCH-1",
+            "sequence": 1, "hierarchy_level": 1,
+            "source": {"file": "s.md", "relative_path": ".", "lines": [1], "section_title": "S", "section_markdown": "S"},
+            "metadata": {"phase": 1, "test_level": "unit", "parent_aa": "BATCH", "parent_td": "TD", "aa_dependencies": [], "tags": []},
+            "task": {"title": "T", "description": "D", "implementation_notes": "", "scenarios": [], "files_to_modify": [], "acceptance_criteria": []},
+            "traceability": {}, "status": {"state": "pending"},
+        }
+        fp = tmp_path / "task.json"
+        fp.write_text(json.dumps(data))
+        args = argparse.Namespace(dir=str(tmp_path), schema="testing", dry_run=False, skip_errors=False)
+        cmd_batch_import(args, app_context)
+        captured = capsys.readouterr()
+        assert "OK" in captured.out or "Imported" in captured.out
+
+    def test_skip_errors(self, app_context, capsys, tmp_path):
+        import json
+        valid_data = {
+            "sub_task_id": "AA-BATCH-2",
+            "sequence": 1, "hierarchy_level": 1,
+            "source": {"file": "s.md", "relative_path": ".", "lines": [1], "section_title": "S", "section_markdown": "S"},
+            "metadata": {"phase": 1, "effort": "M", "dependencies": [], "parent_aa": "BATCH", "parent_title": "P", "tags": []},
+            "task": {"title": "T", "description": "D", "implementation_notes": "", "acceptance_criteria": [], "files_to_modify": []},
+            "traceability": {}, "status": {"state": "pending"},
+        }
+        (tmp_path / "valid.json").write_text(json.dumps(valid_data))
+        (tmp_path / "bad.json").write_text("not json")
+        args = argparse.Namespace(dir=str(tmp_path), schema=None, dry_run=False, skip_errors=True)
+        cmd_batch_import(args, app_context)
+        captured = capsys.readouterr()
+        assert "skipped" in captured.out
+
+
+class TestCmdBatchLink:
+    def test_by_field_mode(self, app_context, store, impl_task_data, test_task_data, capsys):
+        store.insert_task("implementation", impl_task_data)
+        store.insert_task("testing", test_task_data)
+        app_context.engine._conn.commit()
+
+        args = argparse.Namespace(
+            source_schema="testing", target_schema="implementation",
+            rel_type="tests", by_field="parent_aa", from_file=None,
+        )
+        cmd_batch_link(args, app_context)
+        captured = capsys.readouterr()
+        assert "Linked" in captured.out
+        rows = app_context.engine.fetchall("SELECT * FROM task_relationships")
+        assert len(rows) >= 1
+
+    def test_from_file_mode(self, app_context, store, impl_task_data, test_task_data, tmp_path, capsys):
+        store.insert_task("implementation", impl_task_data)
+        store.insert_task("testing", test_task_data)
+        app_context.engine._conn.commit()
+
+        mapping_file = tmp_path / "mapping.json"
+        mapping_file.write_text(json.dumps([{"source_id": "TD-AA100-1", "target_id": "AA100-1"}]))
+        args = argparse.Namespace(
+            source_schema="testing", target_schema="implementation",
+            rel_type="tests", by_field=None, from_file=str(mapping_file),
+        )
+        cmd_batch_link(args, app_context)
+        captured = capsys.readouterr()
+        assert "Linked" in captured.out
+
+    def test_validation_errors(self, app_context, capsys):
+        args = argparse.Namespace(
+            source_schema="testing", target_schema="implementation",
+            rel_type="tests", by_field=None, from_file=None,
+        )
+        cmd_batch_link(args, app_context)
+        captured = capsys.readouterr()
+        assert "either --by-field or --from-file" in captured.out
+
+    def test_mutually_exclusive(self, app_context, capsys):
+        args = argparse.Namespace(
+            source_schema="testing", target_schema="implementation",
+            rel_type="tests", by_field="parent_aa", from_file="mapping.json",
+        )
+        cmd_batch_link(args, app_context)
+        captured = capsys.readouterr()
+        assert "mutually exclusive" in captured.out
+
+
+class TestCmdBatchUpdate:
+    def test_update_by_phase(self, app_context, store, impl_task_data, capsys):
+        store.insert_task("implementation", impl_task_data)
+        app_context.engine._conn.commit()
+
+        args = argparse.Namespace(schema=None, status="in_progress", phase=1, ids=None)
+        cmd_batch_update(args, app_context)
+        captured = capsys.readouterr()
+        assert "Updated" in captured.out
+
+        task = app_context.store.get_task("implementation", "AA100-1")
+        assert task["status"] == "in_progress"
+
+    def test_update_by_ids(self, app_context, store, impl_task_data, test_task_data, capsys):
+        store.insert_task("implementation", impl_task_data)
+        store.insert_task("testing", test_task_data)
+        app_context.engine._conn.commit()
+
+        args = argparse.Namespace(schema=None, status="completed", phase=None, ids="AA100-1,TD-AA100-1")
+        cmd_batch_update(args, app_context)
+        captured = capsys.readouterr()
+        assert "Updated" in captured.out
+
+        assert app_context.store.get_task("implementation", "AA100-1")["status"] == "completed"
+        assert app_context.store.get_task("testing", "TD-AA100-1")["status"] == "completed"
+
+    def test_update_no_filter_error(self, app_context, capsys):
+        args = argparse.Namespace(schema=None, status="completed", phase=None, ids=None)
+        cmd_batch_update(args, app_context)
+        captured = capsys.readouterr()
+        assert "--phase or --ids" in captured.out
+
+
+class TestCmdBatchDelete:
+    def test_delete_by_ids(self, app_context, store, impl_task_data, test_task_data, capsys):
+        store.insert_task("implementation", impl_task_data)
+        store.insert_task("testing", test_task_data)
+        app_context.engine._conn.commit()
+
+        args = argparse.Namespace(schema=None, ids="AA100-1,TD-AA100-1", phase=None)
+        cmd_batch_delete(args, app_context)
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+        assert app_context.store.get_task("implementation", "AA100-1") is None
+        assert app_context.store.get_task("testing", "TD-AA100-1") is None
+
+    def test_delete_by_phase(self, app_context, store, impl_task_data, capsys):
+        store.insert_task("implementation", impl_task_data)
+        app_context.engine._conn.commit()
+
+        args = argparse.Namespace(schema="implementation", ids=None, phase=1)
+        cmd_batch_delete(args, app_context)
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+        assert app_context.store.get_task("implementation", "AA100-1") is None

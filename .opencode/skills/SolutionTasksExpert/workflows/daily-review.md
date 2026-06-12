@@ -52,6 +52,19 @@ Call: get_history(task_id=<active_id>, limit=10)
 
 Review status transitions and notes to understand what changed since last session.
 
+## Step 6: Batch Update Phase
+
+To kick off a new phase of work:
+
+```
+Call: batch_update_status(
+  phase=<N>,
+  new_status="in_progress"
+)
+```
+
+This sets all tasks in the given phase to `in_progress` so you can start working through them.
+
 ## Summary Format
 
 Report to user:

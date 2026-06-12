@@ -28,6 +28,10 @@ class ToolCatalog:
         {"name": "log", "description": "Show recent changes across all tasks", "usage": "task log [--schema <id>] [--limit <n>] [--json]"},
         {"name": "port", "description": "Find available TCP ports on 127.0.0.1", "usage": "task port [--list <n>] [--range <lo-hi>]"},
         {"name": "catalog", "description": "Display the complete tool catalog", "usage": "task catalog [--format json|markdown]"},
+        {"name": "batch-import", "description": "Batch import JSON files from a directory", "usage": "task batch-import <dir> [--schema <id>] [--dry-run] [--skip-errors]"},
+        {"name": "batch-link", "description": "Batch link tasks by naming convention or mapping file", "usage": "task batch-link --source-schema <s> --target-schema <t> --rel-type <r> --by-field <f>"},
+        {"name": "batch-update", "description": "Batch update task status", "usage": "task batch-update --status <s> [--phase <n>] [--ids <csv>]"},
+        {"name": "batch-delete", "description": "Batch delete tasks", "usage": "task batch-delete [--ids <csv>] [--phase <n>]"},
     ]
 
     MCP_TOOLS: list[dict[str, str]] = [
@@ -37,6 +41,8 @@ class ToolCatalog:
         {"name": "update_status", "description": "Update task status", "params": "task_id, new_status, schema_id"},
         {"name": "delete_task", "description": "Delete a task and all its sub-entities", "params": "task_id, schema_id"},
         {"name": "link_tasks", "description": "Create a relationship between two tasks", "params": "source_id, target_id, rel_type, source_schema, target_schema, properties"},
+        {"name": "unlink_tasks", "description": "Delete a relationship between two tasks", "params": "source_id, target_id, rel_type, source_schema, target_schema"},
+        {"name": "reload_schemas", "description": "Force reload all schemas from disk", "params": "(none)"},
         {"name": "status_report", "description": "Get a full status report", "params": "(none)"},
         {"name": "gap_analysis", "description": "Find gaps in test coverage, stale tasks, empty schemas", "params": "(none)"},
         {"name": "dependency_chain", "description": "Trace the dependency chain for a task", "params": "task_id, schema_id"},
@@ -44,6 +50,11 @@ class ToolCatalog:
         {"name": "validate_task", "description": "Validate a task JSON without inserting", "params": "task_json"},
         {"name": "get_history", "description": "Get change history for a task", "params": "task_id, schema_id, limit"},
         {"name": "get_catalog", "description": "Get the complete tool catalog", "params": "format"},
+        {"name": "import_tasks", "description": "Batch import all JSON task files from a directory", "params": "dir_path, schema, dry_run, skip_errors"},
+        {"name": "export_tasks", "description": "Export tasks to JSON files in a directory", "params": "schema_id, output_dir, status, phase"},
+        {"name": "batch_link_tasks", "description": "Batch link tasks by field matching or mapping file", "params": "source_schema, target_schema, rel_type, by_field, from_file"},
+        {"name": "batch_update_status", "description": "Batch update status for multiple tasks", "params": "task_ids, new_status, schema_id, phase"},
+        {"name": "batch_delete_tasks", "description": "Batch delete tasks by IDs or phase", "params": "task_ids, schema_id, phase"},
     ]
 
     MCP_RESOURCES: list[dict[str, str]] = [

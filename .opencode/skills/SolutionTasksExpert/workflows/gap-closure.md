@@ -26,7 +26,7 @@ Examine the acceptance criteria and files to understand what needs testing.
 Call: search_tasks(query="TD-{AA_ID}")
 ```
 
-The query uses the AA code (e.g., `M05`) to find any TD tasks already linked to it.
+The query uses the AA code (e.g., `AA-0.5`) to find any TD tasks already linked to it.
 
 ### 2c. If no test exists
 
@@ -64,7 +64,31 @@ Call: link_tasks(
 )
 ```
 
-## Step 3: Verify Coverage
+## Step 3: [OPTIONAL] Batch Link
+
+Instead of manually linking each TD task to its AA task:
+
+```
+Call: batch_link_tasks(
+  source_schema="testing",
+  target_schema="implementation",
+  rel_type="tests",
+  by_field="parent_aa"
+)
+```
+
+This auto-links testing tasks to implementation tasks where `metadata.parent_aa` matches the AA task's ID prefix.
+
+## Step 3b: [OPTIONAL] Export
+
+After linking, export tasks from DB to JSON files:
+
+```
+Call: export_tasks(schema_id="testing", output_dir=<td_json_directory>)
+Call: export_tasks(schema_id="implementation", output_dir=<aa_json_directory>)
+```
+
+## Step 5: Verify Coverage
 
 ```
 Call: gap_analysis()

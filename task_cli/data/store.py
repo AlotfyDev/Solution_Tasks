@@ -45,6 +45,8 @@ class TaskStore:
             extra["effort"] = data["metadata"].get("effort", "")
         elif schema_id == "testing":
             extra["test_level"] = data["metadata"].get("test_level", "")
+            extra["parent_aa_id"] = data["metadata"].get("parent_aa", "")
+            extra["parent_td_id"] = data["metadata"].get("parent_td", "")
 
         columns = list(common) + list(extra)
         params = {**common, **extra}
