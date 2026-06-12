@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "implementation-schema.json",
+  "title": "AA Implementation Task Schema",
+  "description": "Default schema for implementation sub-tasks derived from AA (After_Audit) markdown specifications.",
+  "type": "object",
+  "required": ["sub_task_id", "sequence", "hierarchy_level", "source", "metadata", "task", "traceability", "status"],
+
+  "definitions": {
+    "line_range": {
+      "type": "array", "items": { "type": "integer", "minimum": 1 },
+      "minItems": 2, "maxItems": 2
+    },
+    "acceptance_criterion": {
+      "type": "object", "required": ["id", "description"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Z]+\\d+-C\\d+$" },
+        "description": { "type": "string" },
+        "verified_by": { "type": "string" }
+      }
+    },
+    "file_ref": {
+      "type": "object", "required": ["path", "change_type"],
+      "properties": {
+        "path": { "type": "string" },
+        "change_type": { "type": "string", "enum": ["create", "modify", "delete"] },
+        "description": { "type": "string" }
+      }
+    },
+    "dependency": {
+      "type": "object", "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["hard", "soft"] }
+      }
+    }
+  },
+
+  "properties": {
+    "sub_task_id": { "type": "string", "pattern": "^[A-Z]+\\d+-\\d+(-\\d+)*$" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "hierarchy_level": { "type": "integer", "minimum": 1, "maximum": 10 },
+
+    "source": {
+      "type": "object", "required": ["file", "relative_path", "lines", "section_title"],
+      "properties": {
+        "file": { "type": "string" },
+        "relative_path": { "type": "string" },
+        "lines": { "$ref": "#/definitions/line_range" },
+        "section_title": { "type": "string" },
+        "section_markdown": { "type": "string" }
+      }
+    },
+
+    "metadata": {
+      "type": "object",
+      "required": ["phase", "effort", "dependencies", "parent_aa", "parent_title"],
+      "properties": {
+        "phase": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "effort": { "type": "string" },
+        "dependencies": { "type": "array", "items": { "$ref": "#/definitions/dependency" } },
+        "parent_aa": { "type": "string" },
+        "parent_title": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "task": {
+      "type": "object",
+      "required": ["title", "description", "acceptance_criteria", "files_to_modify"],
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "implementation_notes": { "type": "string" },
+        "acceptance_criteria": {
+          "type": "array", "items": { "$ref": "#/definitions/acceptance_criterion" }, "minItems": 1
+        },
+        "files_to_modify": {
+          "type": "array", "items": { "$ref": "#/definitions/file_ref" }
+        }
+      }
+    },
+
+    "traceability": {
+      "type": "object",
+      "properties": {
+        "td_reference": { "type": "string" },
+        "td_section": { "type": "string" }
+      }
+    },
+
+    "tests": {
+      "type": "object",
+      "properties": {
+        "test_files": {
+          "type": "array", "items": { "$ref": "#/definitions/file_ref" }
+        },
+        "coverage_gap": { "type": "string" }
+      }
+    },
+
+    "status": {
+      "type": "object", "required": ["state"],
+      "properties": {
+        "state": { "type": "string", "enum": ["pending", "in_progress", "completed", "blocked", "cancelled"] },
+        "assigned_to": { "type": "string" },
+        "completion_date": { "type": "string" },
+        "verification": {
+          "type": "object",
+          "properties": {
+            "compiles": { "type": "boolean" },
+            "tests_pass": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "children": {
+      "type": "array", "items": { "$ref": "#" }
+    },
+
+    "notes": {
+      "type": "array", "items": {
+        "type": "object", "required": ["date", "text"],
+        "properties": {
+          "date": { "type": "string" },
+          "text": { "type": "string" },
+          "author": { "type": "string" }
+        }
+      }
+    }
+  }
+}

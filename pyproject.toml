@@ -1,0 +1,22 @@
+[project]
+name = "task-toolkit"
+version = "0.1.0"
+description = "Modular task management CLI with pluggable schema registry and SQLite persistence"
+requires-python = ">=3.10"
+dependencies = [
+    "jsonschema>=4.20.0",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+sse = ["uvicorn>=0.30.0"]
+
+[project.scripts]
+task = "task_cli.main:entry"
+task-mcp = "task_cli.mcp_server:entry"
+
+[tool.setuptools.packages.find]
+include = ["task_cli*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

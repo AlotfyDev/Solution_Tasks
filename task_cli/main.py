@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+import sys
+
+from task_cli.presentation.commands import (
+    AppContext,
+    build_parser,
+    cmd_catalog,
+    cmd_delete,
+    cmd_export,
+    cmd_get,
+    cmd_history,
+    cmd_import,
+    cmd_insert,
+    cmd_link,
+    cmd_list,
+    cmd_log,
+    cmd_port,
+    cmd_query,
+    cmd_schemas,
+    cmd_status,
+    cmd_update,
+    cmd_validate,
+)
+
+
+def entry() -> None:
+    """
+    Console entry point (console_scripts in pyproject.toml).
+
+    1. Build parser
+    2. Parse args
+    3. Create AppContext and initialize (if command needs DB)
+    4. Dispatch to command handler
+    5. Exit with appropriate code (0=success, 1=error)
+    """
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    _HANDLERS = {
+        "validate": cmd_validate,
+        "insert": cmd_insert,
+        "update": cmd_update,
+        "get": cmd_get,
+        "list": cmd_list,
+        "query": cmd_query,
+        "delete": cmd_delete,
+        "link": cmd_link,
+        "status": cmd_status,
+        "schemas": cmd_schemas,
+        "history": cmd_history,
+        "log": cmd_log,
+        "import": cmd_import,
+        "export": cmd_export,
+        "port": cmd_port,
+        "catalog": cmd_catalog,
+    }
+    _NEEDS_DB = {
+        "insert",
+        "update",
+        "get",
+        "list",
+        "query",
+        "delete",
+        "link",
+        "status",
+        "history",
+        "log",
+        "import",
+        "export",
+    }
+
+    ctx = AppContext()
+
+    if args.command in _NEEDS_DB:
+        ctx.initialize(getattr(args, "db_dir", None))
+    else:
+        from task_cli.registry import RelationshipRegistry, SchemaRegistry
+        from task_cli.schemas.implementation import register_implementation_schema
+        from task_cli.schemas.testing import register_testing_schema
+        from task_cli.presentation.commands import register_default_relationships
+        from task_cli.validation.validator import TaskValidator
+
+        ctx.schema_registry = SchemaRegistry()
+        register_implementation_schema(ctx.schema_registry)
+        register_testing_schema(ctx.schema_registry)
+        ctx.rel_registry = RelationshipRegistry()
+        register_default_relationships(ctx.rel_registry)
+        ctx.validator = TaskValidator(ctx.schema_registry)
+
+    try:
+        _HANDLERS[args.command](args, ctx)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    entry()

@@ -1,0 +1,23 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+*.egg-info/
+task_toolkit.egg-info/
+
+# SQLite database (auto-created, user-specific)
+tasks.db
+.data/
+
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+.coverage/
+
+# VS Code
+.vscode/
+
+# OS
+Thumbs.db
