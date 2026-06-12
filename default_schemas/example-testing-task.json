@@ -1,0 +1,46 @@
+{
+  "sub_task_id": "TD-C05-01",
+  "sequence": 1,
+  "hierarchy_level": 1,
+  "source": {
+    "file": "TD-0-C05-ThreadModel.md",
+    "relative_path": "Logger_Adapter_Tests/.docs",
+    "lines": [24, 26],
+    "section_title": "Positive Cases - Normal operation",
+    "section_markdown": "4 frontend threads each call GetLogger and LOG_INFO 1000 times..."
+  },
+  "metadata": {
+    "phase": 0,
+    "test_level": "unit",
+    "parent_aa": "C05",
+    "parent_td": "TD-0-C05",
+    "aa_dependencies": [{"id": "C05"}],
+    "tags": ["thread_model"]
+  },
+  "task": {
+    "title": "Normal operation - 4 threads log 1000 messages each",
+    "description": "4 frontend threads each call GetLogger and LOG_INFO 1000 times...",
+    "implementation_notes": "Use gtest, real Quill backend, fake slow sink with atomic counter",
+    "scenarios": [
+      {"id": "S1", "name": "NormalOperation", "type": "positive"}
+    ],
+    "files_to_modify": [
+      {
+        "path": "Logger_Adapter_Tests/UnitTests/ThreadModel/NormalOperation.cpp",
+        "change_type": "create",
+        "framework": "gtest",
+        "test_cases": [
+          {"name": "NormalOperation", "fixture": "ThreadModelFixture", "status": "template"}
+        ]
+      }
+    ],
+    "acceptance_criteria": [
+      {"id": "TC-01", "description": "All 4000 messages arrive at sink", "verified_by": "ci"}
+    ]
+  },
+  "traceability": {
+    "aa_reference": "C05",
+    "td_reference": "TD-0-C05"
+  },
+  "status": {"state": "pending"}
+}
