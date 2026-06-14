@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "document-schema.json",
+  "title": "Document Schema",
+  "description": "One row per markdown specification file, stores full content.",
+  "type": "object",
+  "required": ["doc_id", "file_path", "title", "content"],
+  "properties": {
+    "doc_id": {
+      "type": "string",
+      "pattern": "^(AA|TD|IMPACT|DOC)-[\\dA-Z][\\dA-Za-z.-]*(-[A-Z][A-Za-z0-9-]*)?$",
+      "description": "Format: {CLASS}-{SERIAL}-{TOPIC}. CLASS=AA|TD|IMPACT|DOC, SERIAL=numeric hierarchy, TOPIC=description. Standard: AA-5.1-RateLimiting. Legacy: AA-M05-RateLimiting.",
+      "examples": ["AA-5.1-RateLimiting", "TD-4.13-StderrSink", "AA-M05-RateLimiting", "TD-0-C05-ThreadModel"]
+    },
+    "file_path": { "type": "string" },
+    "title": { "type": "string" },
+    "content": { "type": "string" },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "phase": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["pending", "in_progress", "completed", "blocked", "cancelled"]
+        }
+      },
+      "required": ["state"]
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string" },
+          "text": { "type": "string" },
+          "author": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from task_cli.data.engine import DatabaseEngine
@@ -11,6 +12,7 @@ from task_cli.presentation.report import ReportGenerator
 from task_cli.registry import RelationshipRegistry, SchemaRegistry
 from task_cli.schemas.implementation import register_implementation_schema
 from task_cli.schemas.testing import register_testing_schema
+from task_cli.schemas.document import register_document_schema
 from task_cli.validation.validator import TaskValidator
 
 
@@ -22,6 +24,7 @@ class TestIntegration:
         self.schema_registry = SchemaRegistry()
         register_implementation_schema(self.schema_registry)
         register_testing_schema(self.schema_registry)
+        register_document_schema(self.schema_registry)
 
         self.rel_registry = RelationshipRegistry()
         register_default_relationships(self.rel_registry)
@@ -38,16 +41,7 @@ class TestIntegration:
             "sub_task_id": "AA999-1",
             "sequence": 1,
             "hierarchy_level": 1,
-            "source": {
-                "file": "spec.md", "relative_path": ".",
-                "lines": [1, 10], "section_title": "Integration",
-                "section_markdown": "# Integration\nContent",
-            },
-            "metadata": {
-                "phase": 2, "effort": "L", "dependencies": [],
-                "parent_aa": "AA999", "parent_title": "Parent",
-                "tags": ["integration", "e2e"],
-            },
+            "parent_doc_id": "AA999",
             "task": {
                 "title": "Integration Feature",
                 "description": "End-to-end integration feature",
@@ -59,6 +53,11 @@ class TestIntegration:
                     {"path": "src/main.cpp", "change_type": "modify", "description": "Add feature"},
                 ],
             },
+            "metadata": {
+                "phase": 2, "effort": "L", "dependencies": [],
+                "parent_aa": "AA999", "parent_title": "Parent",
+                "tags": ["integration", "e2e"],
+            },
             "traceability": {},
             "status": {"state": "pending"},
         }
@@ -67,16 +66,7 @@ class TestIntegration:
             "sub_task_id": "TD-AA999-1",
             "sequence": 1,
             "hierarchy_level": 1,
-            "source": {
-                "file": "test.md", "relative_path": ".",
-                "lines": [1, 15], "section_title": "Test Integration",
-                "section_markdown": "# Test\nContent",
-            },
-            "metadata": {
-                "phase": 2, "test_level": "integration",
-                "parent_aa": "AA999", "parent_td": "TD999",
-                "aa_dependencies": [], "tags": ["integration_test"],
-            },
+            "parent_doc_id": "AA999",
             "task": {
                 "title": "Integration Test",
                 "description": "Integration tests for feature",
@@ -98,6 +88,11 @@ class TestIntegration:
                     {"id": "TC-1", "description": "Tests pass", "verified_by": "ci"},
                 ],
             },
+            "metadata": {
+                "phase": 2, "test_level": "integration",
+                "parent_aa": "AA999", "parent_td": "TD999",
+                "aa_dependencies": [], "tags": ["integration_test"],
+            },
             "traceability": {
                 "aa_reference": "AA999",
                 "td_reference": "TD999",
@@ -113,6 +108,7 @@ class TestIntegration:
         ids = self.schema_registry.list_ids()
         assert "implementation" in ids
         assert "testing" in ids
+        assert "document" in ids
 
     def test_02_database_created(self):
         assert self.engine.db_path.exists()
@@ -120,6 +116,7 @@ class TestIntegration:
         assert self.engine.table_exists("task_history")
         assert self.engine.table_exists("tasks_implementation")
         assert self.engine.table_exists("tasks_testing")
+        assert self.engine.table_exists("tasks_document")
 
     def test_03_validate_impl_data(self):
         errors = self.validator.validate(self.impl_data, "implementation")
@@ -281,3 +278,40 @@ class TestIntegration:
 
         deleted = self.store.delete_task("implementation", impl_id)
         assert deleted is True
+
+    def test_15_document_first_integration(self):
+        """Test: create document -> parse -> extract -> insert sub-tasks -> verify relationships"""
+        spec_path = Path(__file__).parent / "testdata" / "sample-spec.md"
+        spec_content = spec_path.read_text()
+
+        # Extract document and sub-tasks using spec_parser
+        from spec_parser.parser import parse
+        from spec_parser.extractor import extract_document, extract_sub_tasks
+
+        tokens = parse(spec_content)
+        from spec_parser.parser import visit
+        parsed = visit(tokens)
+
+        doc = extract_document(parsed, str(spec_path))
+        tasks = extract_sub_tasks(parsed, doc["doc_id"], "testdata/sample-spec.md")
+
+        assert doc["doc_id"] == "sample-spec"
+        assert len(tasks) >= 1
+
+        # Insert document
+        self.store.insert_document(doc)
+        inserted_doc = self.store.get_document("sample-spec")
+        assert inserted_doc is not None
+        assert "Test Document" in inserted_doc["title"]
+
+        # Insert sub-tasks
+        for task in tasks:
+            self.store.insert_task("implementation", task)
+            self.history.record_creation(task["sub_task_id"], "implementation")
+        self.engine._conn.commit()
+
+        # Verify relationships exist
+        stored_tasks = self.store.list_tasks("implementation")
+        for task in tasks:
+            found = any(t["id"] == task["sub_task_id"] for t in stored_tasks)
+            assert found, f"Task {task['sub_task_id']} not found"

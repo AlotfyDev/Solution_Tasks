@@ -32,7 +32,13 @@ class TaskValidator:
 
         if schema_id is None:
             sub_task_id = instance.get("sub_task_id", "")
-            schema_id = "testing" if sub_task_id.startswith("TD-") else "implementation"
+            for schema in self._registry.list():
+                prefix = getattr(schema, "id_prefix", "")
+                if prefix and sub_task_id.startswith(prefix):
+                    schema_id = schema.schema_id
+                    break
+            else:
+                schema_id = "implementation"
 
         return self.validate(instance, schema_id)
 

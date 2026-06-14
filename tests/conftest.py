@@ -20,6 +20,8 @@ def schema_registry():
     registry = SchemaRegistry()
     register_implementation_schema(registry)
     register_testing_schema(registry)
+    from task_cli.schemas.document import register_document_schema
+    register_document_schema(registry)
     return registry
 
 
@@ -72,21 +74,7 @@ def impl_task_data():
         "sub_task_id": "AA100-1",
         "sequence": 1,
         "hierarchy_level": 1,
-        "source": {
-            "file": "spec.md",
-            "relative_path": ".",
-            "lines": [1, 10],
-            "section_title": "Section 1",
-            "section_markdown": "# Section 1\nContent",
-        },
-        "metadata": {
-            "phase": 1,
-            "effort": "M",
-            "dependencies": [],
-            "parent_aa": "AA100",
-            "parent_title": "Parent",
-            "tags": ["backend", "core"],
-        },
+        "parent_doc_id": "AA100",
         "task": {
             "title": "Implement feature X",
             "description": "Implement feature X in the core module",
@@ -100,6 +88,14 @@ def impl_task_data():
                 {"path": "include/core.h", "change_type": "modify", "description": "Update header"},
             ],
         },
+        "metadata": {
+            "phase": 1,
+            "effort": "M",
+            "dependencies": [],
+            "parent_aa": "AA100",
+            "parent_title": "Parent",
+            "tags": ["backend", "core"],
+        },
         "traceability": {},
         "status": {"state": "pending"},
     }
@@ -111,21 +107,7 @@ def test_task_data():
         "sub_task_id": "TD-AA100-1",
         "sequence": 1,
         "hierarchy_level": 1,
-        "source": {
-            "file": "test_spec.md",
-            "relative_path": ".",
-            "lines": [1, 15],
-            "section_title": "Test Section",
-            "section_markdown": "# Test Section\nContent",
-        },
-        "metadata": {
-            "phase": 1,
-            "test_level": "unit",
-            "parent_aa": "AA100",
-            "parent_td": "TD1",
-            "aa_dependencies": [],
-            "tags": ["unit_test"],
-        },
+        "parent_doc_id": "AA100",
         "task": {
             "title": "Test feature X",
             "description": "Write unit tests for feature X",
@@ -149,6 +131,14 @@ def test_task_data():
                 {"id": "TC-1", "description": "Tests compile and pass", "verified_by": "ci"},
             ],
         },
+        "metadata": {
+            "phase": 1,
+            "test_level": "unit",
+            "parent_aa": "AA100",
+            "parent_td": "TD1",
+            "aa_dependencies": [],
+            "tags": ["unit_test"],
+        },
         "traceability": {
             "aa_reference": "AA100",
             "td_reference": "TD1",
@@ -169,3 +159,14 @@ def test_json_file(tmp_path, test_task_data):
     path = tmp_path / "test_task.json"
     path.write_text(json.dumps(test_task_data))
     return path
+
+
+@pytest.fixture
+def doc_data() -> dict:
+    return {
+        "doc_id": "DOC-TEST-01",
+        "file_path": "docs/test.md",
+        "title": "DOC-TEST-01 — Test Document",
+        "content": "# Test\n\nContent here.",
+        "status": {"state": "pending"},
+    }

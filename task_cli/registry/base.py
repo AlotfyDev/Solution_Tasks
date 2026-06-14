@@ -26,6 +26,18 @@ class TaskSchema:
     # DDL statements for creating this schema's tables
     ddl_statements: list[str] = field(default_factory=list)
 
+    # Extra columns for the main table: [{"column": "effort", "json_path": "metadata.effort", "default": ""}]
+    extra_columns: list[dict] = None
+
+    # Extra columns for files table (beyond task_id, path, change_type)
+    file_fields: list[dict] = None
+
+    # Prefix used to detect schema from task IDs (e.g. "AA-" or "TD-")
+    id_prefix: str = ""
+
+    # Regex pattern for validating task IDs
+    task_id_pattern: str = ""
+
     def json_schema(self) -> dict:
         if self.json_schema_path is not None:
             current_mtime = self.json_schema_path.stat().st_mtime

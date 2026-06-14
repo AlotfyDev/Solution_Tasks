@@ -8,7 +8,6 @@
     "sub_task_id",
     "sequence",
     "hierarchy_level",
-    "source",
     "metadata",
     "task",
     "traceability",
@@ -98,18 +97,13 @@
       "minimum": 1,
       "maximum": 10
     },
+    "parent_doc_id": {
+      "type": "string",
+      "description": "References tasks_document.id — the source spec document"
+    },
     "source": {
       "type": "object",
-      "required": [
-        "file",
-        "relative_path",
-        "lines",
-        "section_title"
-      ],
       "properties": {
-        "file": {
-          "type": "string"
-        },
         "relative_path": {
           "type": "string"
         },
@@ -117,9 +111,6 @@
           "$ref": "#/definitions/line_range"
         },
         "section_title": {
-          "type": "string"
-        },
-        "section_markdown": {
           "type": "string"
         }
       }
@@ -185,7 +176,7 @@
           "items": {
             "$ref": "#/definitions/acceptance_criterion"
           },
-          "minItems": 1
+          "minItems": 0
         },
         "files_to_modify": {
           "type": "array",

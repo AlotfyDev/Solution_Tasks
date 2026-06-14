@@ -21,18 +21,48 @@ The Task Toolkit MCP server is available at:
 - **stdio**: `task-mcp` (via Cline/Kilocode subprocess). Configured in `.cline/mcp.json` and `.kilo/mcp_servers.json`.
 - **SSE**: `task-mcp --sse --port PORT` (standalone network server)
 
-### Tools Available (20)
+### Tools Available (28)
 (Read `catalog://overview` or call `get_catalog()` for full details)
 
+#### Task CRUD
 | Tool | Purpose |
 |------|---------|
 | `list_tasks` | Filter by schema/status/phase |
 | `get_task` | Full task + sub-entities |
 | `insert_task` | Validate + add new task |
 | `update_status` | Change task state |
+| `update_task` | Update arbitrary field |
 | `delete_task` | Remove task + cascade |
+
+#### Relationships
+| Tool | Purpose |
+|------|---------|
 | `link_tasks` | Create relationships |
 | `unlink_tasks` | Delete a relationship |
+| `batch_link_tasks` | Batch link by field matching |
+
+#### Document CRUD
+| Tool | Purpose |
+|------|---------|
+| `insert_document` | Create document record |
+| `get_document` | Get document by ID |
+| `list_documents` | List all documents |
+| `update_document` | Update document fields |
+| `delete_document` | Delete document by ID |
+| `import_documents` | Batch-import markdown files as documents |
+| `normalize_doc_id` | Generate standard doc_id |
+
+#### Batch Operations
+| Tool | Purpose |
+|------|---------|
+| `import_tasks` | Batch import JSON files from directory |
+| `export_tasks` | Export tasks to JSON files |
+| `batch_update_status` | Batch update status for multiple tasks |
+| `batch_delete_tasks` | Batch delete tasks by IDs or phase |
+
+#### Reports & Utilities
+| Tool | Purpose |
+|------|---------|
 | `reload_schemas` | Reload schema files from disk |
 | `status_report` | Full progress |
 | `gap_analysis` | Find coverage gaps |
@@ -41,11 +71,6 @@ The Task Toolkit MCP server is available at:
 | `validate_task` | Check JSON validity |
 | `get_history` | Change log |
 | `get_catalog` | This catalog |
-| `import_tasks` | Batch import JSON files from directory |
-| `export_tasks` | Export tasks to JSON files |
-| `batch_link_tasks` | Batch link by field matching |
-| `batch_update_status` | Batch update status for multiple tasks |
-| `batch_delete_tasks` | Batch delete tasks by IDs or phase |
 
 ### Resources Available (4)
 | Resource | Content |
@@ -126,6 +151,32 @@ Full workflow in `workflows/onboarding.md`. Steps:
 9. Extract `source.section_markdown` from the actual markdown source file (not a placeholder) and populate `traceability` with `aa_reference` and `td_reference`
 
 > **Note**: Testing schema has strict formats — `aa_dependencies` requires array of `{"id": "..."}` objects (not strings), and **testing** acceptance criterion IDs must match `^TC-\d+$` (digits only, e.g., `TC-01`). **implementation** AC IDs are `type: string` (any format, e.g., `AC-01`). Read the canonical example before producing JSON.
+
+## Document ID Naming Convention
+
+doc_ids follow this standard format:
+
+```
+{CLASS}-{SERIAL}-{TOPIC}
+```
+
+| Part | Rules | Examples |
+|------|-------|----------|
+| **CLASS** | One of `AA`, `TD`, `IMPACT`, `DOC` | `AA`, `TD`, `IMPACT`, `DOC` |
+| **SERIAL** | Numeric-only, dot-separated hierarchy | `5`, `5.1`, `4.13`, `0` |
+| **TOPIC** | PascalCase or kebab-case description | `RateLimiting`, `StderrSink` |
+
+Examples: `AA-5.1-RateLimiting`, `TD-4.13-StderrSink`, `IMPACT-5.18-LogSanitization`, `DOC-1-ProjectSetup`
+
+### Tools
+
+- **MCP**: `normalize_doc_id(filename, schema?, serial?, topic?)` — generates a compliant doc_id
+- **CLI**: `task normalize-doc-id <path> [--schema <s>] [--serial <s>] [--topic <t>]`
+- **Validation**: `insert_document` warns if doc_id deviates from the standard
+
+### Legacy
+
+Existing doc_ids (like `AA-M05-RateLimiting`, `TD-0-C05-ThreadModel`) remain valid in the DB. New entries should use the standard format above.
 
 ## Best Practices
 

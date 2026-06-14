@@ -115,19 +115,25 @@ class TestToolCatalog:
         result = catalog.get_catalog_json()
         cmd_names = [c["name"] for c in result["cli_commands"]]
         assert "catalog" in cmd_names
-        assert len(cmd_names) == 20
+        assert "load-docs" in cmd_names
+        assert "list-documents" in cmd_names
+        assert len(cmd_names) == 22
 
     def test_json_lists_mcp_tools(self, catalog):
         result = catalog.get_catalog_json()
         tool_names = [t["name"] for t in result["mcp_tools"]]
         assert "get_catalog" in tool_names
-        assert len(tool_names) == 18
+        assert "insert_document" in tool_names
+        assert "get_document" in tool_names
+        assert "list_documents" in tool_names
+        assert len(tool_names) == 24
 
     def test_json_lists_mcp_resources(self, catalog):
         result = catalog.get_catalog_json()
         uris = [r["uri"] for r in result["mcp_resources"]]
         assert "catalog://overview" in uris
-        assert len(uris) == 4
+        assert "doc://{doc_id}" in uris
+        assert len(uris) == 5
 
 
 class TestCmdCatalog:

@@ -20,12 +20,15 @@ def register_testing_schema(registry: SchemaRegistry) -> TaskSchema:
             "files": "test_files_testing",
             "cases": "test_cases_testing",
         },
+        id_prefix="TD-",
+        task_id_pattern=r"^TD-\w+-\d+$",
         ddl_statements=[
             """
 CREATE TABLE IF NOT EXISTS tasks_testing (
     id TEXT PRIMARY KEY,
     parent_td_id TEXT,
     parent_aa_id TEXT,
+    parent_doc_id TEXT,
     sequence INT,
     hierarchy_level INT,
     title TEXT,
@@ -34,10 +37,6 @@ CREATE TABLE IF NOT EXISTS tasks_testing (
     test_level TEXT,
     impl_notes TEXT,
     status TEXT DEFAULT 'pending',
-    source_file TEXT,
-    source_lines TEXT,
-    section_title TEXT,
-    section_markdown TEXT,
     created_at TEXT,
     updated_at TEXT
 )
@@ -71,6 +70,15 @@ CREATE TABLE IF NOT EXISTS test_cases_testing (
     FOREIGN KEY (task_id, file_path) REFERENCES test_files_testing(task_id, path)
 )
 """,
+        ],
+        extra_columns=[
+            {"column": "test_level", "json_path": "metadata.test_level", "default": ""},
+            {"column": "parent_aa_id", "json_path": "metadata.parent_aa", "default": ""},
+            {"column": "parent_td_id", "json_path": "metadata.parent_td", "default": ""},
+            {"column": "parent_doc_id", "json_path": "parent_doc_id", "default": ""},
+        ],
+        file_fields=[
+            {"column": "framework", "default": "gtest"},
         ],
     )
     registry.register(schema)

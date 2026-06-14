@@ -25,9 +25,15 @@ from task_cli.presentation.commands import (
     cmd_get,
     cmd_history,
     cmd_import,
+    cmd_import_documents,
     cmd_insert,
     cmd_link,
     cmd_list,
+    cmd_delete_document,
+    cmd_list_documents,
+    cmd_load_docs,
+    cmd_normalize_doc_id,
+    cmd_update_document,
     cmd_log,
     cmd_port,
     cmd_query,
@@ -77,6 +83,12 @@ def entry() -> None:
         "batch-link": cmd_batch_link,
         "batch-update": cmd_batch_update,
         "batch-delete": cmd_batch_delete,
+        "load-docs": cmd_load_docs,
+        "delete-document": cmd_delete_document,
+        "list-documents": cmd_list_documents,
+        "import-documents": cmd_import_documents,
+        "update-document": cmd_update_document,
+        "normalize-doc-id": cmd_normalize_doc_id,
     }
     _NEEDS_DB = {
         "insert",
@@ -95,6 +107,11 @@ def entry() -> None:
         "batch-link",
         "batch-update",
         "batch-delete",
+        "load-docs",
+        "delete-document",
+        "list-documents",
+        "import-documents",
+        "update-document",
     }
 
     ctx = AppContext()
@@ -105,12 +122,14 @@ def entry() -> None:
         from task_cli.registry import RelationshipRegistry, SchemaRegistry
         from task_cli.schemas.implementation import register_implementation_schema
         from task_cli.schemas.testing import register_testing_schema
+        from task_cli.schemas.document import register_document_schema
         from task_cli.presentation.commands import register_default_relationships
         from task_cli.validation.validator import TaskValidator
 
         ctx.schema_registry = SchemaRegistry()
         register_implementation_schema(ctx.schema_registry)
         register_testing_schema(ctx.schema_registry)
+        register_document_schema(ctx.schema_registry)
         ctx.rel_registry = RelationshipRegistry()
         register_default_relationships(ctx.rel_registry)
         ctx.validator = TaskValidator(ctx.schema_registry)

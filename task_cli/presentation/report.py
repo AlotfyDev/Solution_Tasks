@@ -37,15 +37,18 @@ class ReportGenerator:
         schema_ids = [schema_id] if schema_id else self._registry.list_ids()
         result: dict[int, dict[str, int]] = {}
         for sid in schema_ids:
-            rows = self._engine.fetchall(
-                f"SELECT phase, status, COUNT(*) as cnt FROM {self._main_table(sid)} "
-                f"GROUP BY phase, status ORDER BY phase"
-            )
-            for r in rows:
-                phase = r["phase"]
-                if phase not in result:
-                    result[phase] = {}
-                result[phase][r["status"]] = result[phase].get(r["status"], 0) + r["cnt"]
+            try:
+                rows = self._engine.fetchall(
+                    f"SELECT phase, status, COUNT(*) as cnt FROM {self._main_table(sid)} "
+                    f"GROUP BY phase, status ORDER BY phase"
+                )
+                for r in rows:
+                    phase = r["phase"]
+                    if phase not in result:
+                        result[phase] = {}
+                    result[phase][r["status"]] = result[phase].get(r["status"], 0) + r["cnt"]
+            except Exception:
+                continue
         return result
 
     def full_report(self, schema_id: Optional[str] = None) -> str:
@@ -120,14 +123,17 @@ class ReportGenerator:
         lines.append("\n--- Blocked Tasks ---")
         found_blocked = False
         for sid in schema_ids:
-            blocked = self._engine.fetchall(
-                f"SELECT id, title, phase FROM {self._main_table(sid)} WHERE status = 'blocked'"
-            )
-            if blocked:
-                found_blocked = True
-                lines.append(f"  [{sid}]")
-                for b in blocked:
-                    lines.append(f"    {b['id']}: {b.get('title', '')} (phase {b.get('phase', '')})")
+            try:
+                blocked = self._engine.fetchall(
+                    f"SELECT id, title, phase FROM {self._main_table(sid)} WHERE status = 'blocked'"
+                )
+                if blocked:
+                    found_blocked = True
+                    lines.append(f"  [{sid}]")
+                    for b in blocked:
+                        lines.append(f"    {b['id']}: {b.get('title', '')} (phase {b.get('phase', '')})")
+            except Exception:
+                continue
         if not found_blocked:
             lines.append("  (none)")
 
@@ -154,13 +160,14 @@ class ReportGenerator:
 
         # 1. Implementation tasks without linked test tasks
         lines.append("\n1. Implementation tasks without linked test tasks:")
+        impl_table = self._registry.get("implementation").table_names["main"]
         impl_tasks = self._engine.fetchall(
-            "SELECT t.id, t.title, t.status "
-            "FROM tasks_implementation t "
-            "WHERE t.id NOT IN ("
-            "  SELECT target_id FROM task_relationships "
-            "  WHERE rel_type = 'tests' AND target_schema = 'implementation'"
-            ")"
+            f"SELECT t.id, t.title, t.status "
+            f"FROM {impl_table} t "
+            f"WHERE t.id NOT IN ("
+            f"  SELECT target_id FROM task_relationships "
+            f"  WHERE rel_type = 'tests' AND target_schema = 'implementation'"
+            f")"
         )
         if impl_tasks:
             for t in impl_tasks:
@@ -170,11 +177,13 @@ class ReportGenerator:
 
         # 2. Test tasks referencing missing implementation tasks
         lines.append("\n2. Test tasks referencing missing implementation tasks:")
+        testing_table = self._registry.get("testing").table_names["main"]
+        impl_table = self._registry.get("implementation").table_names["main"]
         orphan_tests = self._engine.fetchall(
-            "SELECT t.id, t.parent_aa_id, t.title "
-            "FROM tasks_testing t "
-            "LEFT JOIN tasks_implementation i ON t.parent_aa_id = i.id "
-            "WHERE t.parent_aa_id IS NOT NULL AND t.parent_aa_id != '' AND i.id IS NULL"
+            f"SELECT t.id, t.parent_aa_id, t.title "
+            f"FROM {testing_table} t "
+            f"LEFT JOIN {impl_table} i ON t.parent_aa_id = i.id "
+            f"WHERE t.parent_aa_id IS NOT NULL AND t.parent_aa_id != '' AND i.id IS NULL"
         )
         if orphan_tests:
             for t in orphan_tests:

@@ -140,7 +140,6 @@ class TestTaskStoreList:
         data2 = dict(impl_task_data)
         data2["sub_task_id"] = "AA100-2"
         data2["task"] = dict(data2["task"])
-        data2["source"] = dict(data2["source"])
         data2["metadata"] = dict(data2["metadata"])
         data2["status"] = dict(data2["status"])
         store.insert_task("implementation", data2)
@@ -232,3 +231,76 @@ class TestTaskStoreDelete:
             ("TD-AA100-1",),
         )
         assert len(rows) == 0
+
+
+class TestDocumentStore:
+    def test_insert_document(self, store):
+        doc = {
+            "doc_id": "AA-TEST-DOC",
+            "file_path": "/path/to/test.md",
+            "title": "Test Document",
+            "content": "# Test\n\nContent here",
+            "status": {"state": "pending"},
+        }
+        result_id = store.insert_document(doc)
+        assert result_id == "AA-TEST-DOC"
+
+    def test_get_document(self, store):
+        doc = {
+            "doc_id": "AA-GET-TEST",
+            "file_path": "/path/test.md",
+            "title": "Get Test",
+            "content": "Full markdown content",
+            "status": {"state": "completed"},
+        }
+        store.insert_document(doc)
+        result = store.get_document("AA-GET-TEST")
+
+        assert result is not None
+        assert result["title"] == "Get Test"
+        assert result["content"] == "Full markdown content"
+
+    def test_get_nonexistent_document(self, store):
+        result = store.get_document("NONEXISTENT-DOC")
+        assert result is None
+
+    def test_list_documents(self, store):
+        store.insert_document({
+            "doc_id": "AA-DOC-1",
+            "file_path": "/a.md",
+            "title": "First",
+            "content": "# A",
+            "status": {"state": "pending"},
+        })
+        store.insert_document({
+            "doc_id": "AA-DOC-2",
+            "file_path": "/b.md",
+            "title": "Second",
+            "content": "# B",
+            "status": {"state": "pending"},
+        })
+
+        docs = store.list_documents()
+        assert len(docs) >= 2
+        ids = {d["id"] for d in docs}
+        assert "AA-DOC-1" in ids
+        assert "AA-DOC-2" in ids
+
+    def test_insert_document_upsert(self, store):
+        doc = {
+            "doc_id": "AA-UPSERT-TEST",
+            "file_path": "/path/v1.md",
+            "title": "Original Title",
+            "content": "Original content",
+            "status": {"state": "pending"},
+        }
+        store.insert_document(doc)
+
+        doc["file_path"] = "/path/v2.md"
+        doc["title"] = "Updated Title"
+        store.insert_document(doc)
+
+        result = store.get_document("AA-UPSERT-TEST")
+        assert result["title"] == "Updated Title"
+        assert result["file_path"] == "/path/v2.md"
+        assert result["created_at"] is not None

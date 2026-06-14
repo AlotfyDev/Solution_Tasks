@@ -12,14 +12,18 @@ from task_cli.mcp_server import (
     catalog_resource,
     delete_task,
     dependency_chain,
+    document_resource,
     entry,
     gap_analysis,
     get_catalog,
     get_context,
+    get_document,
     get_history,
     get_task,
+    insert_document,
     insert_task,
     link_tasks,
+    list_documents,
     list_tasks,
     mcp,
     search_tasks,
@@ -59,21 +63,7 @@ def impl_task_data():
         "sub_task_id": "AA200-1",
         "sequence": 1,
         "hierarchy_level": 1,
-        "source": {
-            "file": "spec.md",
-            "relative_path": ".",
-            "lines": [1, 10],
-            "section_title": "Section 1",
-            "section_markdown": "# Section 1\nContent",
-        },
-        "metadata": {
-            "phase": 1,
-            "effort": "M",
-            "dependencies": [],
-            "parent_aa": "AA200",
-            "parent_title": "Parent",
-            "tags": ["backend"],
-        },
+        "parent_doc_id": "AA200",
         "task": {
             "title": "Implement feature Y",
             "description": "Implement feature Y in the core module",
@@ -84,6 +74,14 @@ def impl_task_data():
             "files_to_modify": [
                 {"path": "src/core.cpp", "change_type": "modify", "description": "Add feature Y"},
             ],
+        },
+        "metadata": {
+            "phase": 1,
+            "effort": "M",
+            "dependencies": [],
+            "parent_aa": "AA200",
+            "parent_title": "Parent",
+            "tags": ["backend"],
         },
         "traceability": {},
         "status": {"state": "pending"},
@@ -96,21 +94,7 @@ def test_task_data():
         "sub_task_id": "TD-AA200-1",
         "sequence": 1,
         "hierarchy_level": 1,
-        "source": {
-            "file": "test_spec.md",
-            "relative_path": ".",
-            "lines": [1, 15],
-            "section_title": "Test Section",
-            "section_markdown": "# Test Section\nContent",
-        },
-        "metadata": {
-            "phase": 1,
-            "test_level": "unit",
-            "parent_aa": "AA200",
-            "parent_td": "TD1",
-            "aa_dependencies": [],
-            "tags": ["unit_test"],
-        },
+        "parent_doc_id": "AA200",
         "task": {
             "title": "Test feature Y",
             "description": "Write unit tests for feature Y",
@@ -131,6 +115,14 @@ def test_task_data():
             "acceptance_criteria": [
                 {"id": "TC-1", "description": "Tests compile and pass", "verified_by": "ci"},
             ],
+        },
+        "metadata": {
+            "phase": 1,
+            "test_level": "unit",
+            "parent_aa": "AA200",
+            "parent_td": "TD1",
+            "aa_dependencies": [],
+            "tags": ["unit_test"],
         },
         "traceability": {
             "aa_reference": "AA200",
@@ -689,9 +681,94 @@ class TestLazyInit:
         ids = ctx.schema_registry.list_ids()
         assert "implementation" in ids
         assert "testing" in ids
+        assert "document" in ids
 
     def test_get_context_creates_db(self):
         ctx = get_context()
         assert ctx.engine.db_path.exists()
+
+
+# ── Document MCP tool tests ───────────────────────────────────────────
+
+
+class TestInsertDocument:
+    def test_valid_doc(self, ctx):
+        data = {
+            "doc_id": "AA-DOC",
+            "file_path": "docs/spec.md",
+            "title": "AA-DOC — Test",
+            "content": "# AA-DOC\n\nTest content.",
+            "status": {"state": "pending"},
+        }
+        result = insert_document(json.dumps(data))
+        assert "Inserted document" in result
+        assert "AA-DOC" in result
+
+    def test_invalid_json(self, ctx):
+        result = insert_document("not json")
+        assert "Invalid JSON" in result
+
+    def test_validation_error(self, ctx):
+        data = {"bad": "data"}
+        result = insert_document(json.dumps(data))
+        assert "Validation errors" in result
+
+
+class TestGetDocument:
+    def test_existing(self, ctx):
+        ctx.store.insert_document({
+            "doc_id": "AA-DOC2",
+            "file_path": "docs/spec2.md",
+            "title": "AA-DOC2",
+            "content": "# AA-DOC2",
+        })
+        ctx.engine._conn.commit()
+        result = get_document("AA-DOC2")
+        assert result["id"] == "AA-DOC2"
+        assert result["title"] == "AA-DOC2"
+
+    def test_missing(self):
+        result = get_document("UNKNOWN-DOC")
+        assert result == {}
+
+
+class TestListDocuments:
+    def test_empty(self):
+        result = list_documents()
+        assert result == []
+
+    def test_with_documents(self, ctx):
+        ctx.store.insert_document({
+            "doc_id": "AA-DOC3",
+            "file_path": "docs/spec3.md",
+            "title": "AA-DOC3",
+            "content": "# AA-DOC3",
+        })
+        ctx.engine._conn.commit()
+        result = list_documents()
+        assert len(result) == 1
+        assert result[0]["id"] == "AA-DOC3"
+
+
+# ── Document resource tests ───────────────────────────────────────────
+
+
+class TestDocumentResource:
+    def test_existing(self, ctx):
+        ctx.store.insert_document({
+            "doc_id": "AA-DOC4",
+            "file_path": "docs/spec4.md",
+            "title": "AA-DOC4",
+            "content": "# AA-DOC4",
+        })
+        ctx.engine._conn.commit()
+        raw = document_resource("AA-DOC4")
+        data = json.loads(raw)
+        assert data["id"] == "AA-DOC4"
+
+    def test_missing(self):
+        raw = document_resource("UNKNOWN-DOC")
+        data = json.loads(raw)
+        assert "error" in data
 
 

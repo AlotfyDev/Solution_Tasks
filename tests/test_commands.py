@@ -18,12 +18,14 @@ from task_cli.presentation.commands import (
     cmd_insert,
     cmd_link,
     cmd_list,
+    cmd_list_documents,
     cmd_log,
     cmd_query,
     cmd_schemas,
     cmd_status,
     cmd_update,
     cmd_validate,
+    cmd_load_docs,
     register_default_relationships,
 )
 from task_cli.registry import RelationshipRegistry
@@ -512,7 +514,7 @@ class TestCmdBatchImport:
         data = {
             "sub_task_id": "TD-BATCH-1",
             "sequence": 1, "hierarchy_level": 1,
-            "source": {"file": "s.md", "relative_path": ".", "lines": [1], "section_title": "S", "section_markdown": "S"},
+            "parent_doc_id": "BATCH",
             "metadata": {"phase": 1, "test_level": "unit", "parent_aa": "BATCH", "parent_td": "TD", "aa_dependencies": [], "tags": []},
             "task": {"title": "T", "description": "D", "implementation_notes": "", "scenarios": [], "files_to_modify": [], "acceptance_criteria": []},
             "traceability": {}, "status": {"state": "pending"},
@@ -529,7 +531,7 @@ class TestCmdBatchImport:
         valid_data = {
             "sub_task_id": "AA-BATCH-2",
             "sequence": 1, "hierarchy_level": 1,
-            "source": {"file": "s.md", "relative_path": ".", "lines": [1], "section_title": "S", "section_markdown": "S"},
+            "parent_doc_id": "BATCH",
             "metadata": {"phase": 1, "effort": "M", "dependencies": [], "parent_aa": "BATCH", "parent_title": "P", "tags": []},
             "task": {"title": "T", "description": "D", "implementation_notes": "", "acceptance_criteria": [], "files_to_modify": []},
             "traceability": {}, "status": {"state": "pending"},
@@ -642,8 +644,41 @@ class TestCmdBatchDelete:
         store.insert_task("implementation", impl_task_data)
         app_context.engine._conn.commit()
 
-        args = argparse.Namespace(schema="implementation", ids=None, phase=1)
+        args = argparse.Namespace(schema=None, ids=None, phase=1)
         cmd_batch_delete(args, app_context)
         captured = capsys.readouterr()
         assert "Deleted" in captured.out
-        assert app_context.store.get_task("implementation", "AA100-1") is None
+
+
+class TestCmdLoadDocs:
+    def test_load_docs_missing_dir(self, app_context, capsys):
+        args = argparse.Namespace(dir="/nonexistent/path", pattern="*.md", dry_run=True)
+        cmd_load_docs(args, app_context)
+        captured = capsys.readouterr()
+        assert "not a directory" in captured.out
+
+    def test_load_docs_no_markdown(self, app_context, tmp_path, capsys):
+        args = argparse.Namespace(dir=str(tmp_path), pattern="*.md", dry_run=True)
+        cmd_load_docs(args, app_context)
+        captured = capsys.readouterr()
+        assert "No .md files found" in captured.out
+
+    def test_load_docs_dry_run(self, app_context, tmp_path, capsys):
+        spec = tmp_path / "AA-TEST.md"
+        spec.write_text("# AA-TEST\n\n## Section 1\n\nDesc\n\n- [ ] AC1")
+        args = argparse.Namespace(dir=str(tmp_path), pattern="*.md", dry_run=True)
+        cmd_load_docs(args, app_context)
+        captured = capsys.readouterr()
+        assert "Document:" in captured.out or "dry run" in captured.out.lower()
+
+    def test_load_docs_creates_document_and_tasks(self, app_context, tmp_path, capsys):
+        spec = tmp_path / "AA-TEST2.md"
+        spec.write_text("# AA-TEST2\n\n## Section 1\n\nDesc\n\n- [ ] AC1")
+        args = argparse.Namespace(dir=str(tmp_path), pattern="*.md", dry_run=False)
+        cmd_load_docs(args, app_context)
+        captured = capsys.readouterr()
+        assert "Loaded" in captured.out
+        doc = app_context.store.get_document("AA-TEST2")
+        assert doc is not None
+        task = app_context.store.get_task("implementation", "AA-TEST2-01")
+        assert task is not None

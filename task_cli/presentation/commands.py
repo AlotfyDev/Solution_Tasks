@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -12,6 +15,7 @@ from task_cli.data.store import TaskStore
 from task_cli.history.tracker import HistoryTracker
 from task_cli.schemas.implementation import register_implementation_schema
 from task_cli.schemas.testing import register_testing_schema
+from task_cli.schemas.document import register_document_schema
 from task_cli.presentation.catalog import ToolCatalog
 
 
@@ -32,6 +36,7 @@ class AppContext:
 
         register_implementation_schema(self.schema_registry)
         register_testing_schema(self.schema_registry)
+        register_document_schema(self.schema_registry)
 
         register_default_relationships(self.rel_registry)
 
@@ -69,12 +74,12 @@ def register_default_relationships(rel_registry: RelationshipRegistry) -> None:
         description="Test case verifies acceptance criterion",
     ))
 
-
-# ── helpers ──────────────────────────────────────────────────────────
-
-def _auto_schema_id(data: dict) -> str:
-    sub_task_id = data.get("sub_task_id", "")
-    return "testing" if sub_task_id.startswith("TD-") else "implementation"
+def _auto_schema_id(sub_task_id: str, reg: SchemaRegistry) -> str:
+    for schema in reg.list():
+        prefix = getattr(schema, "id_prefix", "")
+        if prefix and sub_task_id.startswith(prefix):
+            return schema.schema_id
+    return "implementation"
 
 
 def _trunc(val: str, max_len: int = 40) -> str:
@@ -239,6 +244,39 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ids", default=None, help="Comma-separated task IDs")
     p.add_argument("--phase", type=int, default=None, help="Filter by phase number")
 
+    # load-docs
+    p = sub.add_parser("load-docs", help="Load markdown spec files and create tasks")
+    p.add_argument("--dir", required=True, help="Directory containing .md spec files")
+    p.add_argument("--pattern", default="AA-*.md", help="Glob pattern (default: AA-*.md)")
+    p.add_argument("--dry-run", action="store_true", help="Parse only, no DB changes")
+
+    # import-documents
+    p = sub.add_parser("import-documents", help="Batch-import markdown files from a directory as documents")
+    p.add_argument("dir", type=str, help="Directory containing .md files")
+    p.add_argument("--pattern", default="*.md", help="Glob pattern (default: *.md)")
+    p.add_argument("--dry-run", action="store_true", help="Parse only, no DB changes")
+
+    # list-documents
+    p = sub.add_parser("list-documents", help="List all loaded documents")
+    p.add_argument("--status", default=None, choices=["pending", "in_progress", "completed", "blocked", "cancelled"], help="Filter by status")
+    p.add_argument("--phase", type=int, default=None, help="Filter by phase number")
+
+    # delete-document
+    p = sub.add_parser("delete-document", help="Delete a document by ID")
+    p.add_argument("doc_id", type=str, help="Document ID to delete")
+
+    # update-document
+    p = sub.add_parser("update-document", help="Update a document's fields from JSON file")
+    p.add_argument("doc_id", type=str, help="Document ID to update")
+    p.add_argument("file", type=str, help="Path to JSON file with fields to update")
+
+    # normalize-doc-id
+    p = sub.add_parser("normalize-doc-id", help="Generate a standard doc_id from a filename or parameters")
+    p.add_argument("filename", type=str, help="Filename or path to derive doc_id from")
+    p.add_argument("--schema", default="", help="Schema: implementation/AA, testing/TD, impact/IMPACT, doc/DOC")
+    p.add_argument("--serial", default="", help="Override serial number (e.g. 5.1)")
+    p.add_argument("--topic", default="", help="Override topic description")
+
     return parser
 
 
@@ -278,7 +316,7 @@ def cmd_insert(args: argparse.Namespace, ctx: AppContext) -> None:
         print(f"Error: invalid JSON: {e}")
         return
 
-    schema_id = args.schema if args.schema is not None else _auto_schema_id(data)
+    schema_id = args.schema if args.schema is not None else _auto_schema_id(data.get("sub_task_id", ""), ctx.schema_registry)
 
     errors = ctx.validator.validate(data, schema_id)
     if errors:
@@ -459,16 +497,19 @@ def cmd_status(args: argparse.Namespace, ctx: AppContext) -> None:
         schema = ctx.schema_registry.get(sid)
         main_table = schema.table_names["main"]
 
-        if args.phase is not None:
-            rows = ctx.engine.fetchall(
-                f"SELECT status, COUNT(*) as cnt FROM {main_table} "
-                f"WHERE phase = :phase GROUP BY status",
-                {"phase": args.phase},
-            )
-        else:
-            rows = ctx.engine.fetchall(
-                f"SELECT status, COUNT(*) as cnt FROM {main_table} GROUP BY status"
-            )
+        try:
+            if args.phase is not None:
+                rows = ctx.engine.fetchall(
+                    f"SELECT status, COUNT(*) as cnt FROM {main_table} "
+                    f"WHERE phase = :phase GROUP BY status",
+                    {"phase": args.phase},
+                )
+            else:
+                rows = ctx.engine.fetchall(
+                    f"SELECT status, COUNT(*) as cnt FROM {main_table} GROUP BY status"
+                )
+        except Exception:
+            continue
 
         total = sum(r["cnt"] for r in rows)
 
@@ -577,7 +618,7 @@ def cmd_import(args: argparse.Namespace, ctx: AppContext) -> None:
             skipped += 1
             continue
 
-        schema_id = _auto_schema_id(data)
+        schema_id = _auto_schema_id(data.get("sub_task_id", ""), ctx.schema_registry)
         errs = ctx.validator.validate(data, schema_id)
         if errs:
             print(f"  SKIP {fp.name}: validation failed for schema '{schema_id}'")
@@ -666,7 +707,7 @@ def cmd_port(args: argparse.Namespace, ctx: AppContext) -> None:
         print(port)
 
 
-def _get_field_value(task_data: dict, field: str, task_id: str) -> str:
+def _get_field_value(task_data: dict, field: str, task_id: str, reg: SchemaRegistry) -> str:
     parts = field.split(".", 1)
     if len(parts) == 2:
         nested = task_data.get(parts[0], {})
@@ -674,13 +715,17 @@ def _get_field_value(task_data: dict, field: str, task_id: str) -> str:
             val = nested.get(parts[1], "")
             if val:
                 return val
-    val = task_data.get(field, "")
-    if val:
-        return val
+    for variant in [field, f"{field}_id", f"{field}_name"]:
+        val = task_data.get(variant, "")
+        if val:
+            return val
     import re
     stripped = task_id
-    if stripped.startswith("TD-"):
-        stripped = stripped[3:]
+    for schema in reg.list():
+        prefix = getattr(schema, "id_prefix", "")
+        if prefix and stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+            break
     m = re.match(r"^(.+)-\d+$", stripped)
     if m:
         return m.group(1)
@@ -747,7 +792,7 @@ def cmd_batch_import(args: argparse.Namespace, ctx: AppContext) -> None:
                 errors += 1
                 continue
 
-        schema_id = schema_override if schema_override else _auto_schema_id(data)
+        schema_id = schema_override if schema_override else _auto_schema_id(data.get("sub_task_id", ""), ctx.schema_registry)
         errs = ctx.validator.validate(data, schema_id)
         if errs:
             msg = f"validation failed for schema '{schema_id}'"
@@ -837,20 +882,32 @@ def cmd_batch_link(args: argparse.Namespace, ctx: AppContext) -> None:
 
         for src in source_tasks:
             src_id = src["id"]
-            field_value = _get_field_value(src, by_field, src_id)
+            field_value = _get_field_value(src, by_field, src_id, ctx.schema_registry)
             if not field_value:
                 continue
 
             for tgt in target_tasks:
                 tid = tgt["id"]
                 if tid == field_value or (isinstance(field_value, str) and tid.startswith(f"{field_value}-")):
-                    try:
-                        _do_batch_link(ctx, src_id, tid, rel_type_name, source_schema, target_schema)
-                        print(f"  OK   {src_id} -> {tid}")
-                        linked += 1
-                    except Exception as e:
-                        errors += 1
-                        print(f"  FAIL {src_id} -> {tid}: {e}")
+                    pass
+                elif isinstance(field_value, str) and tid.startswith(f"{field_value}_"):
+                    pass
+                elif isinstance(field_value, str):
+                    matched = False
+                    for schema in ctx.schema_registry.list():
+                        prefix = getattr(schema, "id_prefix", "")
+                        if prefix and tid.startswith(f"{prefix}{field_value}-"):
+                            matched = True
+                            break
+                    if not matched:
+                        continue
+                try:
+                    _do_batch_link(ctx, src_id, tid, rel_type_name, source_schema, target_schema)
+                    print(f"  OK   {src_id} -> {tid}")
+                    linked += 1
+                except Exception as e:
+                    errors += 1
+                    print(f"  FAIL {src_id} -> {tid}: {e}")
 
     print(f"Linked {linked} pairs, {errors} errors")
 
@@ -870,7 +927,7 @@ def cmd_batch_update(args: argparse.Namespace, ctx: AppContext) -> None:
     if ids_str:
         ids = [tid.strip() for tid in ids_str.split(",") if tid.strip()]
         for tid in ids:
-            sid = schema_arg if schema_arg else ("testing" if tid.startswith("TD-") else "implementation")
+            sid = schema_arg if schema_arg else _auto_schema_id(tid, ctx.schema_registry)
             existing = ctx.store.get_task(sid, tid)
             if existing is None:
                 print(f"  SKIP {tid}: not found in schema '{sid}'")
@@ -918,7 +975,7 @@ def cmd_batch_delete(args: argparse.Namespace, ctx: AppContext) -> None:
     if ids_str:
         ids = [tid.strip() for tid in ids_str.split(",") if tid.strip()]
         for tid in ids:
-            sid = schema_arg if schema_arg else ("testing" if tid.startswith("TD-") else "implementation")
+            sid = schema_arg if schema_arg else _auto_schema_id(tid, ctx.schema_registry)
             if ctx.store.delete_task(sid, tid):
                 ctx.history.record_change(tid, sid, "__deleted__", None, None)
                 ctx.engine._conn.commit()
@@ -942,3 +999,280 @@ def cmd_batch_delete(args: argparse.Namespace, ctx: AppContext) -> None:
                     print(f"  FAIL {tid}: delete failed")
 
     print(f"Deleted {deleted} tasks")
+
+
+def cmd_load_docs(args: argparse.Namespace, ctx: AppContext) -> None:
+    from spec_parser.loader import load_directory
+    from spec_parser.parser import parse, visit
+    from spec_parser.extractor import extract_document, extract_sub_tasks
+
+    src_dir = Path(args.dir)
+    if not src_dir.is_dir():
+        print(f"Error: not a directory: {src_dir}")
+        return
+
+    files = load_directory(str(src_dir), args.pattern)
+    if not files:
+        print("No .md files found")
+        return
+
+    dry_run = args.dry_run
+    doc_count = 0
+    task_count = 0
+    errors = 0
+
+    for f in files:
+        filepath = f["path"]
+        content = f["content"]
+        tokens = parse(content)
+        parsed = visit(tokens)
+
+        doc_data = extract_document(parsed, filepath)
+        doc_id = doc_data["doc_id"]
+
+        errors_list = ctx.validator.validate(doc_data, "document")
+        if errors_list:
+            print(f"  SKIP {filepath}: validation failed for document")
+            for e in errors_list:
+                print(f"    {e}")
+            errors += 1
+            continue
+
+        if not dry_run:
+            ctx.store.insert_document(doc_data)
+            ctx.engine._conn.commit()
+        doc_count += 1
+        phase = doc_data.get("metadata", {}).get("phase", 0)
+        print(f"  Document: {doc_id} (Phase {phase}, {len(content)} chars)")
+
+        sub_schema = "testing" if doc_id.startswith("TD-") else "implementation"
+
+        sub_tasks = extract_sub_tasks(parsed, doc_id, filepath)
+        for sub_task in sub_tasks:
+            sub_errors = ctx.validator.validate(sub_task, sub_schema)
+            if sub_errors:
+                print(f"    SKIP {sub_task['sub_task_id']}: validation failed against '{sub_schema}' schema")
+                for e in sub_errors:
+                    print(f"      {e}")
+                errors += 1
+                continue
+
+            if not dry_run:
+                ctx.store.insert_task(sub_schema, sub_task)
+                ctx.engine._conn.commit()
+            task_count += 1
+            print(f"    Sub-task: {sub_task['sub_task_id']}")
+
+    if dry_run:
+        print("---")
+        print(f"Dry run: {doc_count} documents, {task_count} sub-tasks would be created")
+    else:
+        print(f"Loaded {doc_count} documents, {task_count} sub-tasks, {errors} errors")
+
+    return 1 if errors > 0 else None
+
+
+def cmd_import_documents(args: argparse.Namespace, ctx: AppContext) -> None:
+    import re
+    src_dir = Path(args.dir)
+    if not src_dir.is_dir():
+        print(f"Error: not a directory: {src_dir}")
+        return
+
+    md_files = sorted(src_dir.glob(args.pattern))
+    if not md_files:
+        print("No matching files found")
+        return
+
+    dry_run = args.dry_run
+    inserted = 0
+    errors = 0
+    error_details = []
+
+    for fp in md_files:
+        try:
+            content = fp.read_text(encoding="utf-8")
+            doc_id = fp.stem
+
+            title = ""
+            for line in content.split("\n"):
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                    break
+
+            phase = 0
+            m = re.search(r"TD-(\d+)", doc_id)
+            if m:
+                phase = int(m.group(1))
+
+            data = {
+                "doc_id": doc_id,
+                "file_path": str(fp.resolve()),
+                "title": title,
+                "content": content,
+                "metadata": {"phase": phase},
+                "status": {"state": "pending"},
+            }
+
+            errs = ctx.validator.validate(data, "document")
+            if errs:
+                errors += 1
+                msg = f"validation failed: {'; '.join(errs)}"
+                error_details.append(f"{fp.name}: {msg}")
+                print(f"  FAIL {fp.name}: {msg}")
+                continue
+
+            if not dry_run:
+                ctx.store.insert_document(data)
+                ctx.history.record_creation(doc_id, "document")
+                ctx.engine._conn.commit()
+            inserted += 1
+            print(f"  OK   {fp.name} -> {doc_id}")
+        except Exception as e:
+            errors += 1
+            error_details.append(f"{fp.name}: {e}")
+            print(f"  FAIL {fp.name}: {e}")
+
+    total = len(md_files)
+    if dry_run:
+        print(f"Dry run: {inserted} documents would be inserted, {errors} errors")
+    else:
+        print(f"Inserted {inserted} documents, {errors} errors out of {total}")
+
+
+def cmd_delete_document(args: argparse.Namespace, ctx: AppContext) -> None:
+    doc_id = args.doc_id
+    deleted = ctx.store.delete_document(doc_id)
+    if not deleted:
+        print(f"Document '{doc_id}' not found")
+        return
+    ctx.history.record_change(doc_id, "document", "__deleted__", None, None)
+    ctx.engine._conn.commit()
+    print(f"Deleted document {doc_id}")
+
+
+def cmd_update_document(args: argparse.Namespace, ctx: AppContext) -> None:
+    doc_id = args.doc_id
+    file_path = Path(args.file)
+    if not file_path.exists():
+        print(f"Error: file not found: {file_path}")
+        return
+    try:
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"Error: invalid JSON: {e}")
+        return
+    
+    existing = ctx.store.get_document(doc_id)
+    if existing is None:
+        print(f"Document '{doc_id}' not found")
+        return
+    
+    merged = dict(existing)
+    merged.update(data)
+    if "metadata" in data:
+        merged["metadata"] = data["metadata"]
+    if "status" in data:
+        merged["status"] = data["status"]
+    merged["doc_id"] = doc_id
+    
+    errors = ctx.validator.validate(merged, "document")
+    if errors:
+        for err in errors:
+            print(f"  [FAIL] {err}")
+        return
+    
+    ok = ctx.store.update_document(doc_id, merged)
+    if not ok:
+        print(f"Document '{doc_id}' not found")
+        return
+    ctx.history.record_change(doc_id, "document", "__updated__", None, None)
+    ctx.engine._conn.commit()
+    print(f"Updated document {doc_id}")
+
+
+_DOC_ID_STANDARD_CLI = r"^(AA|TD|IMPACT|DOC)-\d+(\.\d+)*(-[A-Z][A-Za-z0-9-]*)?$"
+
+
+def _check_doc_id_convention_cli(doc_id: str) -> list[str]:
+    warnings = []
+    if not re.match(_DOC_ID_STANDARD_CLI, doc_id):
+        parts = doc_id.split("-")
+        if len(parts) < 2:
+            warnings.append(f"Naming convention: '{doc_id}' lacks CLASS-SERIAL-TOPIC")
+        else:
+            cls = parts[0]
+            if cls not in ("AA", "TD", "IMPACT", "DOC"):
+                warnings.append(f"CLASS '{cls}' not in AA|TD|IMPACT|DOC")
+            ser = parts[1]
+            if not ser.replace(".", "").isdigit():
+                warnings.append(f"SERIAL '{ser}' should be numeric-only")
+            if len(parts) < 3:
+                warnings.append("missing TOPIC part")
+            elif not parts[2][0].isupper():
+                warnings.append(f"TOPIC '{parts[2]}' should start with uppercase")
+    return warnings
+
+
+def cmd_normalize_doc_id(args: argparse.Namespace, ctx: AppContext) -> None:
+    from pathlib import Path as _Path
+    stem = _Path(args.filename).stem
+    parts = stem.split("-")
+    cls = "DOC"
+    ser = args.serial or (parts[1] if len(parts) > 1 else "")
+    top = args.topic or ("-".join(parts[2:]) if len(parts) > 2 else parts[-1] if parts else stem)
+
+    schema_to_cls = {"implementation": "AA", "testing": "TD", "impact": "IMPACT", "doc": "DOC"}
+    cls_to_schema = {v: k for k, v in schema_to_cls.items()}
+
+    if args.schema and args.schema in schema_to_cls:
+        cls = schema_to_cls[args.schema]
+    elif parts and parts[0] in cls_to_schema:
+        cls = parts[0]
+
+    if not args.serial:
+        m = re.search(r"(\d[\d.]*)", stem)
+        if m:
+            ser = m.group(1)
+
+    if not args.topic:
+        tidx = stem.find("-") if cls else -1
+        if tidx >= 0:
+            rest = stem[tidx + 1:]
+            m = re.search(r"\d[\d.]*-([A-Z].*)", rest)
+            if m:
+                top = m.group(1).replace("_", "-")
+
+    if not ser:
+        ser = "0"
+    if not top:
+        top = stem
+
+    result = f"{cls}-{ser}-{top}"
+    warnings = _check_doc_id_convention_cli(result)
+    print(f"  doc_id: {result}")
+    if warnings:
+        for w in warnings:
+            print(f"     ⚠ {w}")
+
+
+def cmd_list_documents(args: argparse.Namespace, ctx: AppContext) -> None:
+    rows = ctx.store.list_documents_filtered(
+        status_filter=args.status,
+        phase_filter=args.phase,
+    )
+
+    if args.json:
+        print(json.dumps(rows, indent=2, default=str))
+        return
+
+    if not rows:
+        print("No documents found")
+        return
+
+    headers = ["ID", "Title", "Phase", "Status"]
+    table_rows = [
+        [r["id"], _trunc(r.get("title", ""), 37), str(r.get("phase", 0)), r.get("status", "")]
+        for r in rows
+    ]
+    _print_table(headers, table_rows)

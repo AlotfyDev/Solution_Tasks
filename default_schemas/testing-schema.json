@@ -4,7 +4,7 @@
   "title": "TD Testing Task Schema",
   "description": "Default schema for test sub-tasks derived from TD (Test Design) markdown specifications.",
   "type": "object",
-  "required": ["sub_task_id", "sequence", "hierarchy_level", "source", "metadata", "task", "traceability", "status"],
+  "required": ["sub_task_id", "sequence", "hierarchy_level", "metadata", "task", "traceability", "status"],
 
   "definitions": {
     "line_range": {
@@ -50,16 +50,9 @@
     "sub_task_id": { "type": "string", "pattern": "^TD-[A-Z0-9._-]+$" },
     "sequence": { "type": "integer", "minimum": 1 },
     "hierarchy_level": { "type": "integer", "minimum": 1, "maximum": 10 },
-
-    "source": {
-      "type": "object", "required": ["file", "relative_path", "lines", "section_title"],
-      "properties": {
-        "file": { "type": "string" },
-        "relative_path": { "type": "string" },
-        "lines": { "$ref": "#/definitions/line_range" },
-        "section_title": { "type": "string" },
-        "section_markdown": { "type": "string" }
-      }
+    "parent_doc_id": {
+      "type": "string",
+      "description": "References tasks_document.id — the source spec document"
     },
 
     "metadata": {

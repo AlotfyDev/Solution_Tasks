@@ -32,13 +32,27 @@ class ToolCatalog:
         {"name": "batch-link", "description": "Batch link tasks by naming convention or mapping file", "usage": "task batch-link --source-schema <s> --target-schema <t> --rel-type <r> --by-field <f>"},
         {"name": "batch-update", "description": "Batch update task status", "usage": "task batch-update --status <s> [--phase <n>] [--ids <csv>]"},
         {"name": "batch-delete", "description": "Batch delete tasks", "usage": "task batch-delete [--ids <csv>] [--phase <n>]"},
+        {"name": "load-docs", "description": "Load markdown spec files and create tasks", "usage": "task load-docs --dir <path> [--pattern *.md]"},
+        {"name": "import-documents", "description": "Batch-import markdown files from a directory as documents", "usage": "task import-documents <dir> [--pattern *.md] [--dry-run]"},
+        {"name": "list-documents", "description": "List all loaded documents", "usage": "task list-documents [--status <s>] [--phase <n>] [--json]"},
+        {"name": "delete-document", "description": "Delete a document by ID", "usage": "task delete-document <doc_id>"},
+        {"name": "update-document", "description": "Update a document's fields from JSON file", "usage": "task update-document <doc_id> <file.json>"},
+        {"name": "normalize-doc-id", "description": "Generate a standard doc_id from a filename or parameters", "usage": "task normalize-doc-id <filename> [--schema <s>] [--serial <s>] [--topic <t>]"},
     ]
 
     MCP_TOOLS: list[dict[str, str]] = [
         {"name": "list_tasks", "description": "List tasks with optional schema, status, and phase filters", "params": "schema_id, status, phase"},
         {"name": "get_task", "description": "Get a single task with all sub-entities", "params": "task_id, schema_id"},
         {"name": "insert_task", "description": "Validate and insert a task from JSON content", "params": "task_json, schema_id"},
+        {"name": "insert_document", "description": "Insert a document record (one per markdown spec file)", "params": "doc_json"},
+        {"name": "get_document", "description": "Get a document record by ID", "params": "doc_id"},
+        {"name": "list_documents", "description": "List all document records", "params": "(none)"},
+        {"name": "update_document", "description": "Update a document's fields", "params": "doc_json"},
+        {"name": "delete_document", "description": "Delete a document by ID", "params": "doc_id"},
+        {"name": "import_documents", "description": "Batch-import markdown files from a directory as documents", "params": "dir_path, pattern, dry_run"},
+        {"name": "normalize_doc_id", "description": "Generate a standard doc_id from a filename or parameters", "params": "filename, schema, serial, topic"},
         {"name": "update_status", "description": "Update task status", "params": "task_id, new_status, schema_id"},
+        {"name": "update_task", "description": "Update an arbitrary field of a task", "params": "task_id, field, value, schema_id"},
         {"name": "delete_task", "description": "Delete a task and all its sub-entities", "params": "task_id, schema_id"},
         {"name": "link_tasks", "description": "Create a relationship between two tasks", "params": "source_id, target_id, rel_type, source_schema, target_schema, properties"},
         {"name": "unlink_tasks", "description": "Delete a relationship between two tasks", "params": "source_id, target_id, rel_type, source_schema, target_schema"},
@@ -59,6 +73,7 @@ class ToolCatalog:
 
     MCP_RESOURCES: list[dict[str, str]] = [
         {"uri": "task://{schema_id}/{task_id}", "description": "Get a task as a structured resource (JSON)"},
+        {"uri": "doc://{doc_id}", "description": "Get a document by ID (JSON)"},
         {"uri": "schema://{schema_id}", "description": "Get registered schema definition (JSON Schema)"},
         {"uri": "report://status", "description": "Get full status report (markdown)"},
         {"uri": "catalog://overview", "description": "Complete tool catalog (markdown)"},

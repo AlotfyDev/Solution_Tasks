@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -35,9 +36,15 @@ def get_context() -> AppContext:
 # ── helpers ──────────────────────────────────────────────────────────
 
 
-def _auto_schema_id(data: dict) -> str:
+def _auto_schema_id(data: dict, reg: Optional[SchemaRegistry] = None) -> str:
     sub_task_id = data.get("sub_task_id", "")
-    return "testing" if sub_task_id.startswith("TD-") else "implementation"
+    ctx = get_context()
+    reg = reg or ctx.schema_registry
+    for schema in reg.list():
+        prefix = getattr(schema, "id_prefix", "")
+        if prefix and sub_task_id.startswith(prefix):
+            return schema.schema_id
+    return "implementation"
 
 
 # ── tools ────────────────────────────────────────────────────────────
@@ -97,6 +104,17 @@ def update_status(task_id: str, new_status: str, schema_id: str = "implementatio
     ctx.history.record_status_change(task_id, schema_id, old_status, new_status)
     ctx.engine._conn.commit()
     return f"Updated {task_id}: status '{old_status}' -> '{new_status}'"
+
+
+@mcp.tool(description="Update an arbitrary field of a task. Columns: id, parent_td_id, parent_aa_id, parent_doc_id, title, description, status, test_level, impl_notes, effort, phase, sequence, hierarchy_level")
+def update_task(task_id: str, field: str, value: str, schema_id: str = "implementation") -> str:
+    ctx = get_context()
+    ok = ctx.store.update_task_field(schema_id, task_id, field, value)
+    if not ok:
+        return f"Task '{task_id}' not found in schema '{schema_id}'"
+    ctx.history.record_change(task_id, schema_id, field, None, value)
+    ctx.engine._conn.commit()
+    return f"Updated {task_id}: {field} = '{value}'"
 
 
 @mcp.tool(description="Delete a task and all its sub-entities")
@@ -207,16 +225,19 @@ def search_tasks(query: str) -> list[dict]:
     results: list[dict] = []
 
     for sid in ctx.schema_registry.list_ids():
-        table = ctx.schema_registry.get(sid).table_names["main"]
-        rows = ctx.engine.fetchall(
-            f"SELECT * FROM {table} "
-            f"WHERE title LIKE :q OR description LIKE :q",
-            {"q": pattern},
-        )
-        for r in rows:
-            entry = dict(r)
-            entry["schema_id"] = sid
-            results.append(entry)
+        try:
+            table = ctx.schema_registry.get(sid).table_names["main"]
+            rows = ctx.engine.fetchall(
+                f"SELECT * FROM {table} "
+                f"WHERE title LIKE :q OR description LIKE :q",
+                {"q": pattern},
+            )
+            for r in rows:
+                entry = dict(r)
+                entry["schema_id"] = sid
+                results.append(entry)
+        except Exception:
+            continue
 
     return results
 
@@ -450,7 +471,7 @@ def batch_link_tasks(
 
         for src in source_tasks:
             src_id = src["id"]
-            field_value = _get_field_value(src, by_field, src_id)
+            field_value = _get_field_value(src, by_field, src_id, ctx.schema_registry)
             if not field_value:
                 continue
 
@@ -501,6 +522,240 @@ def batch_delete_tasks(
     with redirect_stdout(buf):
         cmd_batch_delete(ns, ctx)
     return buf.getvalue().strip()
+
+
+_DOC_ID_STANDARD = re.compile(r"^(AA|TD|IMPACT|DOC)-\d+(\.\d+)*(-[A-Z][A-Za-z0-9-]*)?$")
+
+
+def _check_doc_id_convention(doc_id: str) -> list[str]:
+    warnings = []
+    if not _DOC_ID_STANDARD.match(doc_id):
+        parts = doc_id.split("-")
+        if len(parts) < 2:
+            warnings.append(f"Naming convention: '{doc_id}' lacks CLASS-SERIAL-TOPIC structure")
+        else:
+            cls = parts[0]
+            if cls not in ("AA", "TD", "IMPACT", "DOC"):
+                warnings.append(f"Naming convention: CLASS '{cls}' not in AA|TD|IMPACT|DOC")
+            serial = parts[1]
+            if not serial.replace(".", "").isdigit():
+                warnings.append(f"Naming convention: SERIAL '{serial}' should be numeric-only (e.g. 5.1)")
+            if len(parts) < 3:
+                warnings.append(f"Naming convention: missing TOPIC part")
+            elif not parts[2][0].isupper():
+                warnings.append(f"Naming convention: TOPIC '{parts[2]}' should start with uppercase")
+    return warnings
+
+
+@mcp.tool(description="Insert a document into the database")
+def insert_document(doc_json: str) -> str:
+    ctx = get_context()
+    try:
+        data = json.loads(doc_json)
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+    errors = ctx.validator.validate(data, "document")
+    if errors:
+        return "Validation errors:\n" + "\n".join(f"  × {e}" for e in errors)
+
+    doc_id = data["doc_id"]
+    warnings = _check_doc_id_convention(doc_id)
+    doc_id = ctx.store.insert_document(data)
+    ctx.history.record_creation(doc_id, "document")
+    ctx.engine._conn.commit()
+    msg = f"Inserted document {doc_id}"
+    if warnings:
+        msg += "\n" + "\n".join(f"  ⚠ {w}" for w in warnings)
+    return msg
+
+
+_CLASS_MAP = {
+    "implementation": "AA",
+    "testing": "TD",
+    "impact": "IMPACT",
+    "doc": "DOC",
+}
+_REVERSE_CLASS = {v: k for k, v in _CLASS_MAP.items()}
+
+
+@mcp.tool(description="Generate a standard doc_id from a filename or path")
+def normalize_doc_id(
+    filename: str,
+    schema: str = "",
+    serial: str = "",
+    topic: str = "",
+) -> str:
+    stem = Path(filename).stem
+    parts = stem.split("-")
+    cls = "DOC"
+    ser = serial or parts[1] if len(parts) > 1 else ""
+    top = topic or "-".join(parts[2:]) if len(parts) > 2 else parts[-1] if parts else stem
+
+    if schema and schema in _CLASS_MAP:
+        cls = _CLASS_MAP[schema]
+    elif parts and parts[0] in _REVERSE_CLASS:
+        cls = parts[0]
+
+    if not serial:
+        m = re.search(r"(\d[\d.]*)", stem)
+        if m:
+            ser = m.group(1)
+
+    if not topic:
+        tidx = stem.find("-") if cls else -1
+        if tidx >= 0:
+            rest = stem[tidx + 1:]
+            m = re.search(r"\d[\d.]*-([A-Z].*)", rest)
+            if m:
+                top = m.group(1).replace("_", "-")
+
+    if not ser:
+        ser = "0"
+    if not top:
+        top = stem
+
+    result = f"{cls}-{ser}-{top}"
+    return json.dumps({"doc_id": result, "original": stem, "warnings": _check_doc_id_convention(result)})
+
+
+@mcp.tool(description="Get a document by ID")
+def get_document(doc_id: str) -> dict:
+    ctx = get_context()
+    doc = ctx.store.get_document(doc_id)
+    return doc if doc is not None else {}
+
+
+@mcp.tool(description="List all documents")
+def list_documents() -> list[dict]:
+    ctx = get_context()
+    return ctx.store.list_documents()
+
+
+@mcp.tool(description="Delete a document by ID")
+def delete_document(doc_id: str) -> str:
+    ctx = get_context()
+    deleted = ctx.store.delete_document(doc_id)
+    if not deleted:
+        return f"Document '{doc_id}' not found"
+    ctx.history.record_change(doc_id, "document", "__deleted__", None, None)
+    ctx.engine._conn.commit()
+    return f"Deleted document {doc_id}"
+
+
+@mcp.tool(description="Update a document's fields")
+def update_document(doc_json: str) -> str:
+    ctx = get_context()
+    try:
+        data = json.loads(doc_json)
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+    doc_id = data.get("doc_id", "")
+    if not doc_id:
+        return "Missing doc_id"
+    
+    errors = ctx.validator.validate(data, "document")
+    if errors:
+        return "Validation errors:\n" + "\n".join(f"  × {e}" for e in errors)
+    
+    existing = ctx.store.get_document(doc_id)
+    if existing is None:
+        return f"Document '{doc_id}' not found"
+    
+    merged = dict(existing)
+    merged.update(data)
+    if "metadata" in data:
+        merged["metadata"] = data["metadata"]
+    if "status" in data:
+        merged["status"] = data["status"]
+    
+    ok = ctx.store.update_document(doc_id, merged)
+    if not ok:
+        return f"Document '{doc_id}' not found"
+    ctx.history.record_change(doc_id, "document", "__updated__", None, None)
+    ctx.engine._conn.commit()
+    return f"Updated document {doc_id}"
+
+
+@mcp.tool(description="Batch-import markdown files from a directory as documents")
+def import_documents(
+    dir_path: str,
+    pattern: str = "*.md",
+    dry_run: bool = False,
+) -> str:
+    import re
+    ctx = get_context()
+    src_dir = Path(dir_path)
+    if not src_dir.is_dir():
+        return json.dumps({"total": 0, "inserted": 0, "errors": 1, "error_details": [f"Not a directory: {src_dir}"]})
+
+    md_files = sorted(src_dir.glob(pattern))
+    if not md_files:
+        return json.dumps({"total": 0, "inserted": 0, "errors": 0, "error_details": []})
+
+    inserted = 0
+    errors = 0
+    error_details = []
+
+    for fp in md_files:
+        try:
+            content = fp.read_text(encoding="utf-8")
+            doc_id = fp.stem
+
+            title = ""
+            for line in content.split("\n"):
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                    break
+
+            phase = 0
+            m = re.search(r"TD-(\d+)", doc_id)
+            if m:
+                phase = int(m.group(1))
+
+            data = {
+                "doc_id": doc_id,
+                "file_path": str(fp.resolve()),
+                "title": title,
+                "content": content,
+                "metadata": {"phase": phase},
+                "status": {"state": "pending"},
+            }
+
+            errs = ctx.validator.validate(data, "document")
+            if errs:
+                errors += 1
+                error_details.append(f"{fp.name}: validation failed: {'; '.join(errs)}")
+                continue
+
+            if not dry_run:
+                ctx.store.insert_document(data)
+                ctx.history.record_creation(doc_id, "document")
+                ctx.engine._conn.commit()
+            inserted += 1
+        except Exception as e:
+            errors += 1
+            error_details.append(f"{fp.name}: {e}")
+
+    result = {
+        "total": len(md_files),
+        "inserted": inserted,
+        "errors": errors,
+        "error_details": error_details,
+    }
+    return json.dumps(result, indent=2)
+
+
+@mcp.resource(
+    "doc://{doc_id}",
+    description="Get a document as a structured resource",
+)
+def document_resource(doc_id: str) -> str:
+    ctx = get_context()
+    doc = ctx.store.get_document(doc_id)
+    if doc is None:
+        return json.dumps({"error": f"Document '{doc_id}' not found"})
+    return json.dumps(doc, indent=2, default=str)
 
 
 @mcp.resource("catalog://overview", description="Complete tool catalog in markdown")

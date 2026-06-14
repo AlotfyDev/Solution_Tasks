@@ -24,7 +24,7 @@ class TestReportSummaryBySchema:
         data2 = dict(impl_task_data)
         data2["sub_task_id"] = "AA100-2"
         data2["task"] = dict(data2["task"])
-        data2["source"] = dict(data2["source"])
+        
         data2["metadata"] = dict(data2["metadata"])
         data2["status"] = dict(data2["status"])
         store.insert_task("implementation", data2)
@@ -151,7 +151,7 @@ class TestReportDependencyChain:
         data2 = dict(impl_task_data)
         data2["sub_task_id"] = "AA100-2"
         data2["task"] = dict(data2["task"])
-        data2["source"] = dict(data2["source"])
+        
         data2["metadata"] = dict(data2["metadata"])
         data2["status"] = dict(data2["status"])
         store.insert_task("implementation", data2)
@@ -172,7 +172,7 @@ class TestReportDependencyChain:
         data2 = dict(impl_task_data)
         data2["sub_task_id"] = "AA100-2"
         data2["task"] = dict(data2["task"])
-        data2["source"] = dict(data2["source"])
+        
         data2["metadata"] = dict(data2["metadata"])
         data2["status"] = dict(data2["status"])
         store.insert_task("implementation", data2)

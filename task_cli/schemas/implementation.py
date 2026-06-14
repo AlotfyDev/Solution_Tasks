@@ -20,11 +20,14 @@ def register_implementation_schema(registry: SchemaRegistry) -> TaskSchema:
             "files": "task_files_implementation",
             "tags": "tags_implementation",
         },
+        id_prefix="AA-",
+        task_id_pattern=r"^AA\d+-\d+$",
         ddl_statements=[
             """
 CREATE TABLE IF NOT EXISTS tasks_implementation (
     id TEXT PRIMARY KEY,
     parent_id TEXT,
+    parent_doc_id TEXT,
     sequence INT,
     hierarchy_level INT,
     title TEXT,
@@ -33,10 +36,6 @@ CREATE TABLE IF NOT EXISTS tasks_implementation (
     effort TEXT,
     impl_notes TEXT,
     status TEXT DEFAULT 'pending',
-    source_file TEXT,
-    source_lines TEXT,
-    section_title TEXT,
-    section_markdown TEXT,
     created_at TEXT,
     updated_at TEXT
 )
@@ -66,6 +65,13 @@ CREATE TABLE IF NOT EXISTS tags_implementation (
     PRIMARY KEY (task_id, tag)
 )
 """,
+        ],
+extra_columns=[
+             {"column": "effort", "json_path": "metadata.effort", "default": ""},
+             {"column": "parent_doc_id", "json_path": "parent_doc_id", "default": ""},
+         ],
+        file_fields=[
+            {"column": "description", "default": ""},
         ],
     )
     registry.register(schema)

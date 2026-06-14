@@ -39,6 +39,7 @@ class TestTaskSchema:
         assert loaded == schema_content
 
     def test_json_schema_caches(self, tmp_path):
+        import os
         schema_content = {"type": "object"}
         schema_file = tmp_path / "schema.json"
         schema_file.write_text(json.dumps(schema_content))
@@ -51,10 +52,18 @@ class TestTaskSchema:
             json_schema_path=schema_file,
         )
         first = schema.json_schema()
-        # Modify file on disk to verify cache
-        schema_file.write_text(json.dumps({"type": "array"}))
+        # Call again without modifying: should return the cached dict (same object reference)
         second = schema.json_schema()
-        assert second == first  # still the cached original
+        assert second is first
+
+        # Modify file on disk and update mtime to verify reloading
+        schema_file.write_text(json.dumps({"type": "array"}))
+        mtime = schema_file.stat().st_mtime
+        os.utime(schema_file, (mtime + 2, mtime + 2))
+
+        third = schema.json_schema()
+        assert third == {"type": "array"}
+        assert third is not first
 
     def test_json_schema_returns_empty_when_no_path(self):
         schema = TaskSchema(
@@ -150,11 +159,12 @@ class TestSchemaRegistry:
         ids = schema_registry.list_ids()
         assert "implementation" in ids
         assert "testing" in ids
-        assert len(ids) == 2
+        assert "document" in ids
+        assert len(ids) == 3
 
     def test_list(self, schema_registry):
         schemas = schema_registry.list()
-        assert len(schemas) == 2
+        assert len(schemas) == 3
         assert all(isinstance(s, TaskSchema) for s in schemas)
 
     def test_register_custom_schema(self):
