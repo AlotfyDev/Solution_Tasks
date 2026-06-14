@@ -524,7 +524,7 @@ def batch_delete_tasks(
     return buf.getvalue().strip()
 
 
-_DOC_ID_STANDARD = re.compile(r"^(AA|TD|IMPACT|DOC)-\d+(\.\d+)*(-[A-Z][A-Za-z0-9-]*)?$")
+_DOC_ID_STANDARD = re.compile(r"^([A-Z]+-)?(AA|TD|IMPACT|DOC)-\d+(\.\d+)*(-[A-Z][A-Za-z0-9-]*)?$")
 
 
 def _check_doc_id_convention(doc_id: str) -> list[str]:
@@ -534,16 +534,24 @@ def _check_doc_id_convention(doc_id: str) -> list[str]:
         if len(parts) < 2:
             warnings.append(f"Naming convention: '{doc_id}' lacks CLASS-SERIAL-TOPIC structure")
         else:
-            cls = parts[0]
+            offset = 0
+            if len(parts) >= 4:
+                offset = 1
+            cls = parts[offset]
             if cls not in ("AA", "TD", "IMPACT", "DOC"):
                 warnings.append(f"Naming convention: CLASS '{cls}' not in AA|TD|IMPACT|DOC")
-            serial = parts[1]
-            if not serial.replace(".", "").isdigit():
-                warnings.append(f"Naming convention: SERIAL '{serial}' should be numeric-only (e.g. 5.1)")
-            if len(parts) < 3:
+            serial_idx = offset + 1
+            if len(parts) > serial_idx:
+                serial = parts[serial_idx]
+                if not serial.replace(".", "").isdigit():
+                    warnings.append(f"Naming convention: SERIAL '{serial}' should be numeric-only (e.g. 5.1)")
+            if offset and parts[0].isupper():
+                pass
+            topic_idx = offset + 2
+            if len(parts) <= topic_idx:
                 warnings.append(f"Naming convention: missing TOPIC part")
-            elif not parts[2][0].isupper():
-                warnings.append(f"Naming convention: TOPIC '{parts[2]}' should start with uppercase")
+            elif not parts[topic_idx][0].isupper():
+                warnings.append(f"Naming convention: TOPIC '{parts[topic_idx]}' should start with uppercase")
     return warnings
 
 
@@ -585,6 +593,7 @@ def normalize_doc_id(
     schema: str = "",
     serial: str = "",
     topic: str = "",
+    project: str = "",
 ) -> str:
     stem = Path(filename).stem
     parts = stem.split("-")
@@ -615,7 +624,7 @@ def normalize_doc_id(
     if not top:
         top = stem
 
-    result = f"{cls}-{ser}-{top}"
+    result = f"{cls}-{ser}-{top}" if not project else f"{project}-{cls}-{ser}-{top}"
     return json.dumps({"doc_id": result, "original": stem, "warnings": _check_doc_id_convention(result)})
 
 
@@ -682,6 +691,7 @@ def import_documents(
     dir_path: str,
     pattern: str = "*.md",
     dry_run: bool = False,
+    project: str = "",
 ) -> str:
     import re
     ctx = get_context()
@@ -700,7 +710,7 @@ def import_documents(
     for fp in md_files:
         try:
             content = fp.read_text(encoding="utf-8")
-            doc_id = fp.stem
+            doc_id = f"{project}-{fp.stem}" if project else fp.stem
 
             title = ""
             for line in content.split("\n"):

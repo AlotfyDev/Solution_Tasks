@@ -33,11 +33,11 @@ class ToolCatalog:
         {"name": "batch-update", "description": "Batch update task status", "usage": "task batch-update --status <s> [--phase <n>] [--ids <csv>]"},
         {"name": "batch-delete", "description": "Batch delete tasks", "usage": "task batch-delete [--ids <csv>] [--phase <n>]"},
         {"name": "load-docs", "description": "Load markdown spec files and create tasks", "usage": "task load-docs --dir <path> [--pattern *.md]"},
-        {"name": "import-documents", "description": "Batch-import markdown files from a directory as documents", "usage": "task import-documents <dir> [--pattern *.md] [--dry-run]"},
+        {"name": "import-documents", "description": "Batch-import markdown files from a directory as documents", "usage": "task import-documents <dir> [--pattern *.md] [--dry-run] [--project <p>]"},
         {"name": "list-documents", "description": "List all loaded documents", "usage": "task list-documents [--status <s>] [--phase <n>] [--json]"},
         {"name": "delete-document", "description": "Delete a document by ID", "usage": "task delete-document <doc_id>"},
         {"name": "update-document", "description": "Update a document's fields from JSON file", "usage": "task update-document <doc_id> <file.json>"},
-        {"name": "normalize-doc-id", "description": "Generate a standard doc_id from a filename or parameters", "usage": "task normalize-doc-id <filename> [--schema <s>] [--serial <s>] [--topic <t>]"},
+        {"name": "normalize-doc-id", "description": "Generate a standard doc_id from a filename or parameters", "usage": "task normalize-doc-id <filename> [--schema <s>] [--serial <s>] [--topic <t>] [--project <p>]"},
     ]
 
     MCP_TOOLS: list[dict[str, str]] = [
@@ -49,8 +49,8 @@ class ToolCatalog:
         {"name": "list_documents", "description": "List all document records", "params": "(none)"},
         {"name": "update_document", "description": "Update a document's fields", "params": "doc_json"},
         {"name": "delete_document", "description": "Delete a document by ID", "params": "doc_id"},
-        {"name": "import_documents", "description": "Batch-import markdown files from a directory as documents", "params": "dir_path, pattern, dry_run"},
-        {"name": "normalize_doc_id", "description": "Generate a standard doc_id from a filename or parameters", "params": "filename, schema, serial, topic"},
+        {"name": "import_documents", "description": "Batch-import markdown files from a directory as documents", "params": "dir_path, pattern, dry_run, project"},
+        {"name": "normalize_doc_id", "description": "Generate a standard doc_id from a filename or parameters", "params": "filename, schema, serial, topic, project"},
         {"name": "update_status", "description": "Update task status", "params": "task_id, new_status, schema_id"},
         {"name": "update_task", "description": "Update an arbitrary field of a task", "params": "task_id, field, value, schema_id"},
         {"name": "delete_task", "description": "Delete a task and all its sub-entities", "params": "task_id, schema_id"},

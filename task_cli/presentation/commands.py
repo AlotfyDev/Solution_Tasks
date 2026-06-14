@@ -255,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("dir", type=str, help="Directory containing .md files")
     p.add_argument("--pattern", default="*.md", help="Glob pattern (default: *.md)")
     p.add_argument("--dry-run", action="store_true", help="Parse only, no DB changes")
+    p.add_argument("--project", default="", help="Project prefix (e.g. LAT for Logger_Adapter_Tests)")
 
     # list-documents
     p = sub.add_parser("list-documents", help="List all loaded documents")
@@ -276,6 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--schema", default="", help="Schema: implementation/AA, testing/TD, impact/IMPACT, doc/DOC")
     p.add_argument("--serial", default="", help="Override serial number (e.g. 5.1)")
     p.add_argument("--topic", default="", help="Override topic description")
+    p.add_argument("--project", default="", help="Project prefix (e.g. LAT for Logger_Adapter_Tests)")
 
     return parser
 
@@ -1092,7 +1094,8 @@ def cmd_import_documents(args: argparse.Namespace, ctx: AppContext) -> None:
     for fp in md_files:
         try:
             content = fp.read_text(encoding="utf-8")
-            doc_id = fp.stem
+            content = fp.read_text(encoding="utf-8")
+            doc_id = f"{args.project}-{fp.stem}" if args.project else fp.stem
 
             title = ""
             for line in content.split("\n"):
@@ -1191,7 +1194,7 @@ def cmd_update_document(args: argparse.Namespace, ctx: AppContext) -> None:
     print(f"Updated document {doc_id}")
 
 
-_DOC_ID_STANDARD_CLI = r"^(AA|TD|IMPACT|DOC)-\d+(\.\d+)*(-[A-Z][A-Za-z0-9-]*)?$"
+_DOC_ID_STANDARD_CLI = r"^([A-Z]+-)?(AA|TD|IMPACT|DOC)-\d+(\.\d+)*(-[A-Z][A-Za-z0-9-]*)?$"
 
 
 def _check_doc_id_convention_cli(doc_id: str) -> list[str]:
@@ -1201,16 +1204,22 @@ def _check_doc_id_convention_cli(doc_id: str) -> list[str]:
         if len(parts) < 2:
             warnings.append(f"Naming convention: '{doc_id}' lacks CLASS-SERIAL-TOPIC")
         else:
-            cls = parts[0]
+            offset = 0
+            if len(parts) >= 4:
+                offset = 1
+            cls = parts[offset]
             if cls not in ("AA", "TD", "IMPACT", "DOC"):
                 warnings.append(f"CLASS '{cls}' not in AA|TD|IMPACT|DOC")
-            ser = parts[1]
-            if not ser.replace(".", "").isdigit():
-                warnings.append(f"SERIAL '{ser}' should be numeric-only")
-            if len(parts) < 3:
+            serial_idx = offset + 1
+            if len(parts) > serial_idx:
+                ser = parts[serial_idx]
+                if not ser.replace(".", "").isdigit():
+                    warnings.append(f"SERIAL '{ser}' should be numeric-only")
+            topic_idx = offset + 2
+            if len(parts) <= topic_idx:
                 warnings.append("missing TOPIC part")
-            elif not parts[2][0].isupper():
-                warnings.append(f"TOPIC '{parts[2]}' should start with uppercase")
+            elif not parts[topic_idx][0].isupper():
+                warnings.append(f"TOPIC '{parts[topic_idx]}' should start with uppercase")
     return warnings
 
 
@@ -1248,7 +1257,7 @@ def cmd_normalize_doc_id(args: argparse.Namespace, ctx: AppContext) -> None:
     if not top:
         top = stem
 
-    result = f"{cls}-{ser}-{top}"
+    result = f"{cls}-{ser}-{top}" if not args.project else f"{args.project}-{cls}-{ser}-{top}"
     warnings = _check_doc_id_convention_cli(result)
     print(f"  doc_id: {result}")
     if warnings:
